@@ -5,7 +5,7 @@ import mimetypes
 
 from .config import Settings
 from .qwen_adapter import NativeFlowResult, transcribe_via_qwen
-from .storage import save_job, utc_now
+from .storage import mark_job_running, save_job, utc_now
 
 
 async def run_transcription(
@@ -14,41 +14,62 @@ async def run_transcription(
     job_payload: dict,
     job_dir: Path,
     input_path: Path,
-    export_format: str,
     delete_remote: bool,
     account_id: str,
     account_strategy: str,
 ) -> dict:
+    running_payload = mark_job_running(job_payload)
+    save_job(settings.jobs_dir, job_payload["job_id"], running_payload)
     try:
         flow_result = await transcribe_via_qwen(
             settings=settings,
             input_path=input_path,
             output_dir=job_dir / "outputs",
-            export_format=export_format,
+            export_format="md",
             delete_remote=delete_remote,
             account_id=account_id,
             account_strategy=account_strategy,
         )
-        payload = build_success_payload(job_payload, flow_result)
+        payload = build_success_payload(running_payload, flow_result)
     except Exception as error:  # noqa: BLE001
-        payload = build_error_payload(job_payload, error)
+        payload = build_error_payload(running_payload, error)
         (job_dir / "error.txt").write_text(f"{type(error).__name__}: {error}\n", encoding="utf-8")
-    save_job(settings.jobs_dir, job_payload["job_id"], payload)
+    save_job(settings.jobs_dir, running_payload["job_id"], payload)
     return payload
+
+
+async def run_transcription_background(
+    *,
+    settings: Settings,
+    job_payload: dict,
+    job_dir: Path,
+    input_path: Path,
+    delete_remote: bool,
+    account_id: str,
+    account_strategy: str,
+) -> None:
+    await run_transcription(
+        settings=settings,
+        job_payload=job_payload,
+        job_dir=job_dir,
+        input_path=input_path,
+        delete_remote=delete_remote,
+        account_id=account_id,
+        account_strategy=account_strategy,
+    )
 
 
 def build_success_payload(job_payload: dict, flow_result: NativeFlowResult) -> dict:
     output_file = flow_result.export_path.resolve()
-    text = None
-    if output_file.suffix.lower() in {".md", ".txt", ".json"}:
-        text = output_file.read_text(encoding="utf-8")
-    content_type = mimetypes.guess_type(output_file.name)[0]
+    text = output_file.read_text(encoding="utf-8") if output_file.suffix.lower() == ".md" else None
+    content_type = mimetypes.guess_type(output_file.name)[0] or "text/markdown"
     if output_file.suffix.lower() == ".md":
         content_type = "text/markdown"
     now = utc_now()
     return {
         **job_payload,
         "status": "succeeded",
+        "format": "md",
         "text": text,
         "content_type": content_type,
         "output_file": str(output_file),
@@ -72,6 +93,7 @@ def build_error_payload(job_payload: dict, error: Exception) -> dict:
     return {
         **job_payload,
         "status": "failed",
+        "format": "md",
         "updated_at": now,
         "completed_at": now,
         "error": {

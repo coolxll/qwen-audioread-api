@@ -2,12 +2,19 @@
 
 一个面向本地/私有部署的原生 API 服务，用来把通义千问「音视频速读」网页链路包装成可调用的 HTTP 接口。
 
-当前阶段是原生 API MVP，优先提供真实能力，不先做 OpenAI 兼容层。
+当前版本重点面向**发布用途**，输出被强制收敛为：
+
+- **只产出 Markdown (`md`)**
+
+不再支持 `docx` 导出，以避免后续发布工作流里出现多种格式分叉。
 
 ## 当前接口
 
 - `GET /health`
 - `POST /api/v1/transcriptions`
+- `POST /api/v1/transcriptions/async`
+- `POST /api/v1/transcriptions/batch`
+- `GET /api/v1/jobs`
 - `GET /api/v1/jobs/{job_id}`
 - `GET /api/v1/jobs/{job_id}/file`
 
@@ -15,10 +22,22 @@
 
 - 接收单个音频/视频文件上传
 - 调用 `qwen_web_capture` 真实链路完成上传、转写、导出
-- 默认支持导出 `md`，也支持 `docx`
+- 导出格式固定为 `md`
+- 支持同步调用、异步调用、批量异步提交
 - 本地保存 job 元数据、输入文件、输出文件、错误日志
 - 支持指定账号和账号策略
 - 可选 API Key 校验
+
+## 输出约束
+
+这版开始，服务的输出约束如下：
+
+- 接口层只接受 `md` / `markdown`
+- 如果传 `docx` 等其他格式，会直接返回 `400`
+- 下载接口只返回 markdown 文件
+- 返回体中的 `format` 永远是 `md`
+
+这能保证后续发布链路只处理一类文件。
 
 ## 目录说明
 
@@ -35,8 +54,8 @@
 
 说明：
 
-- `data/jobs/<job_id>/input.*`：上传的原始文件
-- `data/jobs/<job_id>/outputs/*`：导出结果
+- `data/jobs/<job_id>/<原始文件名>`：上传的原始文件
+- `data/jobs/<job_id>/outputs/*.md`：导出的 markdown
 - `data/jobs/<job_id>/job.json`：任务状态与结果
 - `data/jobs/<job_id>/error.txt`：失败时的错误摘要
 - `data/runtime/`：账号轮询状态和 quota 状态
@@ -61,89 +80,71 @@ cp .env.example .env
 - `QWEN2API_QWEN_DOTENV`：底层 `.env` 路径
 - `QWEN2API_QWEN_AUTH_STATE`：默认登录态文件
 - `QWEN2API_QWEN_ACCOUNTS_FILE`：账号池配置文件
-- `QWEN2API_DEFAULT_FORMAT`：默认导出格式
 - `QWEN2API_DELETE_REMOTE`：是否默认删除远端记录
 - `QWEN2API_API_KEY`：可选 API Key
 
 ## 启动服务
 
-开发模式：
+建议显式指定一个未被占用的端口，比如 `18000`：
 
 ```bash
 cd /Users/gq/Projects/qwen2api
-PYTHONPATH=src uvicorn qwen2api.main:app --host 0.0.0.0 --port 8000 --reload
+PYTHONPATH=src uvicorn qwen2api.main:app --host 0.0.0.0 --port 18000 --reload
 ```
-
-如果你设置了 `.env`，代码会自动读取 `/Users/gq/Projects/qwen2api/.env`。
 
 ## 接口示例
 
-### 1. 健康检查
+### 1）健康检查
 
 ```bash
-curl http://127.0.0.1:8000/health
+curl http://127.0.0.1:18000/health
 ```
 
-返回示例：
-
-```json
-{"status":"ok"}
-```
-
-### 2. 创建转写任务
+### 2）同步转写
 
 ```bash
-curl -X POST http://127.0.0.1:8000/api/v1/transcriptions   -F 'file=@/absolute/path/to/demo.mp4'   -F 'format=md'   -F 'delete_remote=true'
+curl -X POST http://127.0.0.1:18000/api/v1/transcriptions \
+  -F 'file=@/absolute/path/to/demo.mp4' \
+  -F 'format=md'
 ```
 
-可选字段：
+返回会阻塞到转写完成，适合小批量调用。
 
-- `format`：`md` / `markdown` / `docx`
-- `delete_remote`：`true` / `false`
-- `account`：指定账号 id
-- `account_strategy`：`round-robin` / `failover` / `sticky`
-
-返回示例：
-
-```json
-{
-  "job_id": "job_20260409T132000Z_ab12cd34",
-  "status": "succeeded",
-  "format": "md",
-  "content_type": "text/markdown",
-  "text": "...markdown内容...",
-  "output_file": "/Users/gq/Projects/qwen2api/data/jobs/job_xxx/outputs/demo-2026-04-09T13-20-00+00-00.md",
-  "download_url": "/api/v1/jobs/job_20260409T132000Z_ab12cd34/file",
-  "record_id": "...",
-  "gen_record_id": "...",
-  "remote_deleted": true,
-  "account_id": "account-a",
-  "account_label": "账号A",
-  "original_filename": "demo.mp4",
-  "created_at": "2026-04-09T13:20:00+00:00",
-  "updated_at": "2026-04-09T13:21:05+00:00",
-  "completed_at": "2026-04-09T13:21:05+00:00",
-  "error": null,
-  "meta": {
-    "delete_remote": true,
-    "account_strategy": "round-robin",
-    "input_file": "/Users/gq/Projects/qwen2api/data/jobs/job_xxx/input.mp4",
-    "job_dir": "/Users/gq/Projects/qwen2api/data/jobs/job_xxx",
-    "output_suffix": ".md"
-  }
-}
-```
-
-### 3. 查询任务
+### 3）异步转写
 
 ```bash
-curl http://127.0.0.1:8000/api/v1/jobs/<job_id>
+curl -X POST http://127.0.0.1:18000/api/v1/transcriptions/async \
+  -F 'file=@/absolute/path/to/demo.mp4' \
+  -F 'format=md'
 ```
 
-### 4. 下载导出文件
+返回 `202`，然后用 job 接口轮询。
+
+### 4）批量异步提交
 
 ```bash
-curl -L http://127.0.0.1:8000/api/v1/jobs/<job_id>/file -o result.md
+curl -X POST http://127.0.0.1:18000/api/v1/transcriptions/batch \
+  -F 'files=@/absolute/path/to/a.mp4' \
+  -F 'files=@/absolute/path/to/b.mp4' \
+  -F 'format=md'
+```
+
+### 5）查询全部任务
+
+```bash
+curl http://127.0.0.1:18000/api/v1/jobs
+```
+
+### 6）查询单个任务
+
+```bash
+curl http://127.0.0.1:18000/api/v1/jobs/<job_id>
+```
+
+### 7）下载 markdown
+
+```bash
+curl -L http://127.0.0.1:18000/api/v1/jobs/<job_id>/file -o result.md
 ```
 
 ## API Key
@@ -160,22 +161,29 @@ curl -L http://127.0.0.1:8000/api/v1/jobs/<job_id>/file -o result.md
 -H 'X-API-Key: your-key'
 ```
 
+## 状态说明
+
+任务状态当前有 4 类：
+
+- `queued`：已创建，等待后台执行
+- `running`：执行中
+- `succeeded`：成功，且已产出 markdown
+- `failed`：失败
+
 ## 当前限制
 
-这还是 MVP，暂时有这些限制：
+- 输出格式固定为 `md`
+- 暂不支持取消任务
+- 暂不支持去重 / 断点续跑
+- 批量接口当前是“提交即排队”，不是复杂调度器
+- 仍然依赖底层登录态和 Qwen 网页接口可用
 
-- 仅支持单文件同步转写
-- 暂不提供批量接口
-- 暂不提供异步队列接口
-- 暂不做 OpenAI 兼容层
-- 错误映射还是第一版，后续可以继续细化
-- `text` 字段当前直接返回导出文件全文；如果是 `docx`，则不会内联正文
+## 已验证情况
 
-## 下一步建议
+在真实 mp4 文件下，已经完成过：
 
-等这版原生 API 跑顺后，再做：
+- 8 个视频样本
+- 并发数 3
+- 成功 8 / 失败 0
 
-1. 更细的错误映射
-2. job 列表接口
-3. 异步任务模式
-4. OpenAI 兼容层 `/v1/audio/transcriptions`
+说明当前版本已经适合继续往“发布前转写流水线”方向演进。

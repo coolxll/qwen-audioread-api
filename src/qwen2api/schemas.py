@@ -16,8 +16,8 @@ class ErrorDetail(BaseModel):
 
 class TranscriptionResult(BaseModel):
     job_id: str
-    status: Literal["running", "succeeded", "failed"]
-    format: str
+    status: Literal["queued", "running", "succeeded", "failed"]
+    format: Literal["md"]
     content_type: str | None = None
     text: str | None = None
     output_file: str | None = None
@@ -33,3 +33,23 @@ class TranscriptionResult(BaseModel):
     completed_at: str | None = None
     error: ErrorDetail | None = None
     meta: dict[str, Any] = Field(default_factory=dict)
+
+
+class TranscriptionListResponse(BaseModel):
+    items: list[TranscriptionResult]
+    total: int
+
+
+class BatchJobItem(BaseModel):
+    job_id: str
+    original_filename: str
+    status: Literal["queued", "running", "succeeded", "failed"]
+    job_url: str
+    download_url: str | None = None
+
+
+class BatchTranscriptionResponse(BaseModel):
+    total: int
+    accepted: int
+    format: Literal["md"]
+    items: list[BatchJobItem]
