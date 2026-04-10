@@ -199,6 +199,23 @@ curl -X POST http://127.0.0.1:18000/api/v1/transcriptions/local/batch \
 
 适合你这种本机已有大批量视频的场景。
 
+也可以直接用仓库脚本：
+
+```bash
+cd /Users/gq/Projects/qwen2api
+PYTHONPATH=src python scripts/local_batch_submit.py \
+  --paths-file /absolute/path/to/files.txt
+```
+
+`files.txt` 每行一个本地视频路径。  
+如果要边跑边查批次状态：
+
+```bash
+PYTHONPATH=src python scripts/local_batch_submit.py \
+  --paths-file /absolute/path/to/files.txt \
+  --poll --interval 30
+```
+
 ### 8）查询批次
 
 ```bash
