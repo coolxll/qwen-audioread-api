@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from qwen2api.config import Settings, get_settings
-from qwen2api.job_queue import recover_pending_jobs
+from qwen2api.job_queue import build_retry_payload, recover_pending_jobs, retry_wait_seconds, should_retry_job
 from qwen2api.maintenance import cleanup_jobs, collect_failed_retry_candidates
 from qwen2api.main import create_app
 from qwen2api.qwen_adapter import NativeFlowResult
@@ -49,6 +49,9 @@ def make_settings(root: Path) -> Settings:
         keep_uploaded_input=False,
         keep_intermediate_outputs=False,
         job_worker_count=1,
+        max_retries=2,
+        retry_delay_seconds=1,
+        retryable_error_codes=("TRANSCRIPTION_TIMEOUT", "RATE_LIMITED", "TRANSCRIPTION_FAILED"),
     )
     settings.ensure_directories()
     return settings
@@ -309,6 +312,41 @@ class ServiceTests(unittest.TestCase):
             requeued_running = load_job(settings.jobs_dir, "job_running")
             self.assertEqual(requeued_running["status"], "queued")
             self.assertTrue(requeued_running["meta"]["requeued_after_restart"])
+
+    def test_retry_helpers_schedule_retryable_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            settings = make_settings(Path(tmp))
+            failed_payload = init_job_payload(
+                "job_retry",
+                original_filename="retry.mp4",
+                delete_remote=True,
+                account_id="",
+                account_strategy="round-robin",
+                queued=False,
+            )
+            failed_payload.update(
+                {
+                    "status": "failed",
+                    "error": {"code": "TRANSCRIPTION_TIMEOUT", "message": "timed out"},
+                }
+            )
+
+            self.assertTrue(should_retry_job(settings, failed_payload))
+            retry_payload = build_retry_payload(settings, failed_payload)
+            self.assertEqual(retry_payload["status"], "queued")
+            self.assertEqual(retry_payload["meta"]["retry_count"], 1)
+            self.assertGreaterEqual(retry_wait_seconds(retry_payload), 0)
+
+            exhausted = {
+                **retry_payload,
+                "status": "failed",
+                "error": {"code": "TRANSCRIPTION_TIMEOUT", "message": "timed out"},
+                "meta": {
+                    **retry_payload["meta"],
+                    "retry_count": settings.max_retries,
+                },
+            }
+            self.assertFalse(should_retry_job(settings, exhausted))
 
     def test_reporting_and_cleanup_helpers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

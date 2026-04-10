@@ -50,6 +50,9 @@ class Settings:
     keep_uploaded_input: bool
     keep_intermediate_outputs: bool
     job_worker_count: int
+    max_retries: int
+    retry_delay_seconds: int
+    retryable_error_codes: tuple[str, ...]
 
     @property
     def jobs_dir(self) -> Path:
@@ -110,6 +113,16 @@ def get_settings() -> Settings:
         keep_intermediate_outputs=os.environ.get("QWEN2API_KEEP_INTERMEDIATE_OUTPUTS", "false").strip().lower()
         in {"1", "true", "yes", "on"},
         job_worker_count=max(1, int(os.environ.get("QWEN2API_JOB_WORKERS", "2"))),
+        max_retries=max(0, int(os.environ.get("QWEN2API_MAX_RETRIES", "2"))),
+        retry_delay_seconds=max(0, int(os.environ.get("QWEN2API_RETRY_DELAY_SECONDS", "30"))),
+        retryable_error_codes=tuple(
+            code.strip()
+            for code in os.environ.get(
+                "QWEN2API_RETRYABLE_ERROR_CODES",
+                "TRANSCRIPTION_TIMEOUT,RATE_LIMITED,TRANSCRIPTION_FAILED",
+            ).split(",")
+            if code.strip()
+        ),
     )
     settings.ensure_directories()
     return settings

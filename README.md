@@ -32,6 +32,7 @@
 - 导出格式固定为 `md`
 - 支持同步调用、异步调用、批量异步提交
 - 异步任务改为进程内持久队列，服务重启后会自动捞起 `queued/running` job
+- 临时性失败支持自动重试
 - 异步/批量返回推荐查询时间 `suggested_poll_after_seconds`
 - 批量任务支持 `batch_id` 查询
 - 本地保存 job 元数据、输入文件、输出文件、错误日志
@@ -315,6 +316,12 @@ PYTHONPATH=src python scripts/job_admin.py retry-failed --batch-id <batch_id>
 队列 worker 数量可通过以下配置调整：
 
 - `QWEN2API_JOB_WORKERS=2`
+
+自动重试相关配置：
+
+- `QWEN2API_MAX_RETRIES=2`
+- `QWEN2API_RETRY_DELAY_SECONDS=30`
+- `QWEN2API_RETRYABLE_ERROR_CODES=TRANSCRIPTION_TIMEOUT,RATE_LIMITED,TRANSCRIPTION_FAILED`
 
 ## API Key
 

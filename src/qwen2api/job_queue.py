@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import suppress
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI
 
 from .config import Settings
-from .service import run_transcription_background
+from .service import run_transcription, serialize_job_payload
 from .storage import list_jobs, save_job, utc_now
 
 
@@ -36,16 +37,71 @@ async def enqueue_job(app: FastAPI, settings: Settings, payload: dict) -> None:
     await app.state.job_queue.put(task)
 
 
+def _parse_iso_datetime(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    return datetime.fromisoformat(value)
+
+
+def retry_wait_seconds(payload: dict) -> float:
+    retry_not_before = _parse_iso_datetime(payload.get("meta", {}).get("retry_not_before"))
+    if retry_not_before is None:
+        return 0.0
+    return max(0.0, (retry_not_before - datetime.now(UTC)).total_seconds())
+
+
+def should_retry_job(settings: Settings, payload: dict) -> bool:
+    if payload.get("status") != "failed":
+        return False
+    error_code = (payload.get("error") or {}).get("code")
+    if not error_code or error_code not in settings.retryable_error_codes:
+        return False
+    retry_count = int(payload.get("meta", {}).get("retry_count") or 0)
+    return retry_count < settings.max_retries
+
+
+def build_retry_payload(settings: Settings, payload: dict) -> dict:
+    now = datetime.now(UTC)
+    retry_count = int(payload.get("meta", {}).get("retry_count") or 0) + 1
+    retry_not_before = now + timedelta(seconds=settings.retry_delay_seconds)
+    return {
+        **payload,
+        "status": "queued",
+        "updated_at": utc_now(),
+        "completed_at": None,
+        "error": None,
+        "meta": {
+            **payload.get("meta", {}),
+            "retry_count": retry_count,
+            "max_retries": settings.max_retries,
+            "retry_not_before": retry_not_before.isoformat(timespec="seconds"),
+            "last_retry_at": now.isoformat(timespec="seconds"),
+        },
+    }
+
+
 async def _worker_loop(app: FastAPI, worker_index: int) -> None:
     queue: asyncio.Queue[dict[str, Any]] = app.state.job_queue
     while True:
         task = await queue.get()
         try:
-            await run_transcription_background(**task)
+            wait_seconds = retry_wait_seconds(task["job_payload"])
+            if wait_seconds > 0:
+                await asyncio.sleep(wait_seconds)
+            payload = await run_transcription(**task)
+            if should_retry_job(task["settings"], payload):
+                retry_payload = build_retry_payload(task["settings"], payload)
+                save_job(
+                    task["settings"].jobs_dir,
+                    retry_payload["job_id"],
+                    serialize_job_payload(task["settings"], retry_payload),
+                )
+                task["job_payload"] = retry_payload
+                await queue.put(task)
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001
-            # run_transcription_background already persists failure state; this is a final guard.
+            # run_transcription already persists failure state; this is a final guard.
             pass
         finally:
             queue.task_done()

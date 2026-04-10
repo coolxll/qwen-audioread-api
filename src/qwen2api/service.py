@@ -169,6 +169,7 @@ def build_success_payload(*, settings: Settings, job_payload: dict, flow_result:
 
 def build_error_payload(job_payload: dict, error: Exception) -> dict:
     now = utc_now()
+    error_code = classify_error(error)
     return {
         **job_payload,
         "status": "failed",
@@ -177,7 +178,12 @@ def build_error_payload(job_payload: dict, error: Exception) -> dict:
         "completed_at": now,
         "error": {
             "message": str(error),
-            "code": classify_error(error),
+            "code": error_code,
+        },
+        "meta": {
+            **job_payload.get("meta", {}),
+            "last_error_code": error_code,
+            "last_error_message": str(error),
         },
     }
 
