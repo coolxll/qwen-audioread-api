@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Header, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 
 from ..config import Settings, get_settings
+from ..job_queue import enqueue_job
 from ..schemas import (
     BatchJobItem,
     BatchTranscriptionResponse,
@@ -14,7 +15,7 @@ from ..schemas import (
     TranscriptionListResponse,
     TranscriptionResult,
 )
-from ..service import run_transcription, run_transcription_background
+from ..service import run_transcription
 from ..storage import (
     generate_batch_id,
     generate_job_id,
@@ -355,7 +356,7 @@ async def create_transcription_from_local_path(
     dependencies=[Depends(require_api_key)],
 )
 async def create_transcription_async(
-    background_tasks: BackgroundTasks,
+    request: Request,
     file: UploadFile = File(...),
     format: str | None = Form(default=None),
     delete_remote: bool | None = Form(default=None),
@@ -373,16 +374,7 @@ async def create_transcription_async(
         settings=settings,
         queued=True,
     )
-    background_tasks.add_task(
-        run_transcription_background,
-        settings=settings,
-        job_payload=payload,
-        job_dir=current_job_dir,
-        input_path=input_path,
-        delete_remote=should_delete_remote,
-        account_id=account,
-        account_strategy=account_strategy,
-    )
+    await enqueue_job(request.app, settings, payload)
     return TranscriptionResult(**payload)
 
 
@@ -394,7 +386,7 @@ async def create_transcription_async(
 )
 async def create_transcription_local_async(
     request: LocalTranscriptionRequest,
-    background_tasks: BackgroundTasks,
+    http_request: Request,
     settings: Settings = Depends(get_settings),
 ) -> TranscriptionResult:
     normalize_md_format(request.format)
@@ -407,16 +399,7 @@ async def create_transcription_local_async(
         settings=settings,
         queued=True,
     )
-    background_tasks.add_task(
-        run_transcription_background,
-        settings=settings,
-        job_payload=payload,
-        job_dir=current_job_dir,
-        input_path=input_path,
-        delete_remote=should_delete_remote,
-        account_id=request.account,
-        account_strategy=request.account_strategy,
-    )
+    await enqueue_job(http_request.app, settings, payload)
     return TranscriptionResult(**payload)
 
 
@@ -427,7 +410,7 @@ async def create_transcription_local_async(
     dependencies=[Depends(require_api_key)],
 )
 async def create_transcription_batch(
-    background_tasks: BackgroundTasks,
+    request: Request,
     files: list[UploadFile] = File(...),
     format: str | None = Form(default=None),
     delete_remote: bool | None = Form(default=None),
@@ -450,16 +433,7 @@ async def create_transcription_batch(
             queued=True,
             batch_id=batch_id,
         )
-        background_tasks.add_task(
-            run_transcription_background,
-            settings=settings,
-            job_payload=payload,
-            job_dir=current_job_dir,
-            input_path=input_path,
-            delete_remote=should_delete_remote,
-            account_id=account,
-            account_strategy=account_strategy,
-        )
+        await enqueue_job(request.app, settings, payload)
         payloads.append(payload)
 
     return _build_batch_response_from_payloads(
@@ -477,7 +451,7 @@ async def create_transcription_batch(
 )
 async def create_transcription_local_batch(
     request: LocalBatchTranscriptionRequest,
-    background_tasks: BackgroundTasks,
+    http_request: Request,
     settings: Settings = Depends(get_settings),
 ) -> BatchTranscriptionResponse:
     normalize_md_format(request.format)
@@ -502,16 +476,7 @@ async def create_transcription_local_batch(
             queued=True,
             batch_id=batch_id,
         )
-        background_tasks.add_task(
-            run_transcription_background,
-            settings=settings,
-            job_payload=payload,
-            job_dir=current_job_dir,
-            input_path=input_path,
-            delete_remote=should_delete_remote,
-            account_id=request.account,
-            account_strategy=request.account_strategy,
-        )
+        await enqueue_job(http_request.app, settings, payload)
         payloads.append(payload)
 
     return _build_batch_response_from_payloads(

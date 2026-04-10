@@ -1,17 +1,27 @@
 from __future__ import annotations
 
+import asyncio
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from qwen2api.config import Settings, get_settings
+from qwen2api.job_queue import recover_pending_jobs
 from qwen2api.main import create_app
 from qwen2api.qwen_adapter import NativeFlowResult
 from qwen2api.service import build_success_payload, serialize_job_payload
-from qwen2api.storage import init_job_payload, release_markdown_name_reservation, reserve_markdown_name
+from qwen2api.storage import (
+    init_job_payload,
+    job_dir,
+    load_job,
+    release_markdown_name_reservation,
+    reserve_markdown_name,
+    save_job,
+)
 
 
 def make_settings(root: Path) -> Settings:
@@ -34,6 +44,7 @@ def make_settings(root: Path) -> Settings:
         keep_job_text=False,
         keep_uploaded_input=False,
         keep_intermediate_outputs=False,
+        job_worker_count=1,
     )
     settings.ensure_directories()
     return settings
@@ -44,7 +55,7 @@ class TranscriptionApiTests(unittest.TestCase):
         self.tempdir = tempfile.TemporaryDirectory()
         self.root = Path(self.tempdir.name)
         self.settings = make_settings(self.root)
-        app = create_app()
+        app = create_app(self.settings)
         app.dependency_overrides[get_settings] = lambda: self.settings
         self.client = TestClient(app)
 
@@ -85,7 +96,7 @@ class TranscriptionApiTests(unittest.TestCase):
         self.assertEqual(body["suggested_poll_after_seconds"], 60)
 
     def test_async_transcription_returns_queue_metadata(self) -> None:
-        with patch("qwen2api.api.transcriptions.run_transcription_background", new=AsyncMock(return_value=None)):
+        with patch("qwen2api.api.transcriptions.enqueue_job", new=AsyncMock(return_value=None)):
             response = self.client.post(
                 "/api/v1/transcriptions/async",
                 data={"format": "md"},
@@ -108,7 +119,7 @@ class TranscriptionApiTests(unittest.TestCase):
         left_file.write_bytes(b"a")
         right_file.write_bytes(b"b")
 
-        with patch("qwen2api.api.transcriptions.run_transcription_background", new=AsyncMock(return_value=None)):
+        with patch("qwen2api.api.transcriptions.enqueue_job", new=AsyncMock(return_value=None)):
             response = self.client.post(
                 "/api/v1/transcriptions/local/batch",
                 json={
@@ -203,6 +214,50 @@ class ServiceTests(unittest.TestCase):
             self.assertEqual(name2, "课程?-2.md")
             release_markdown_name_reservation(settings.runtime_dir, name1)
             release_markdown_name_reservation(settings.runtime_dir, name2)
+
+    def test_recover_pending_jobs_requeues_running_work(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            settings = make_settings(Path(tmp))
+            queued_job_dir = job_dir(settings.jobs_dir, "job_queued")
+            queued_input = queued_job_dir / "queued.mp4"
+            queued_input.write_bytes(b"queued")
+            queued_payload = init_job_payload(
+                "job_queued",
+                original_filename="queued.mp4",
+                delete_remote=True,
+                account_id="",
+                account_strategy="round-robin",
+                queued=True,
+            )
+            queued_payload["meta"]["job_dir"] = str(queued_job_dir)
+            queued_payload["meta"]["input_file"] = str(queued_input)
+            save_job(settings.jobs_dir, "job_queued", queued_payload)
+
+            running_job_dir = job_dir(settings.jobs_dir, "job_running")
+            running_input = running_job_dir / "running.mp4"
+            running_input.write_bytes(b"running")
+            running_payload = init_job_payload(
+                "job_running",
+                original_filename="running.mp4",
+                delete_remote=True,
+                account_id="",
+                account_strategy="round-robin",
+                queued=False,
+            )
+            running_payload["status"] = "running"
+            running_payload["meta"]["job_dir"] = str(running_job_dir)
+            running_payload["meta"]["input_file"] = str(running_input)
+            save_job(settings.jobs_dir, "job_running", running_payload)
+
+            app = FastAPI()
+            app.state.settings = settings
+            app.state.job_queue = asyncio.Queue()
+            asyncio.run(recover_pending_jobs(app))
+
+            self.assertEqual(app.state.job_queue.qsize(), 2)
+            requeued_running = load_job(settings.jobs_dir, "job_running")
+            self.assertEqual(requeued_running["status"], "queued")
+            self.assertTrue(requeued_running["meta"]["requeued_after_restart"])
 
 
 if __name__ == "__main__":

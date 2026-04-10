@@ -29,6 +29,7 @@
 - 调用 `qwen_web_capture` 真实链路完成上传、转写、导出
 - 导出格式固定为 `md`
 - 支持同步调用、异步调用、批量异步提交
+- 异步任务改为进程内持久队列，服务重启后会自动捞起 `queued/running` job
 - 异步/批量返回推荐查询时间 `suggested_poll_after_seconds`
 - 批量任务支持 `batch_id` 查询
 - 本地保存 job 元数据、输入文件、输出文件、错误日志
@@ -244,6 +245,10 @@ curl -L http://127.0.0.1:18000/api/v1/jobs/<job_id>/file -o result.md
 - `QWEN2API_KEEP_JOB_TEXT=true`
 - `QWEN2API_KEEP_UPLOADED_INPUT=true`
 - `QWEN2API_KEEP_INTERMEDIATE_OUTPUTS=true`
+
+队列 worker 数量可通过以下配置调整：
+
+- `QWEN2API_JOB_WORKERS=2`
 
 ## API Key
 

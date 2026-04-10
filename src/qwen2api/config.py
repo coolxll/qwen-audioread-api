@@ -49,6 +49,7 @@ class Settings:
     keep_job_text: bool
     keep_uploaded_input: bool
     keep_intermediate_outputs: bool
+    job_worker_count: int
 
     @property
     def jobs_dir(self) -> Path:
@@ -108,6 +109,7 @@ def get_settings() -> Settings:
         in {"1", "true", "yes", "on"},
         keep_intermediate_outputs=os.environ.get("QWEN2API_KEEP_INTERMEDIATE_OUTPUTS", "false").strip().lower()
         in {"1", "true", "yes", "on"},
+        job_worker_count=max(1, int(os.environ.get("QWEN2API_JOB_WORKERS", "2"))),
     )
     settings.ensure_directories()
     return settings
