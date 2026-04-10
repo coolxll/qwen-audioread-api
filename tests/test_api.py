@@ -11,15 +11,19 @@ from fastapi.testclient import TestClient
 
 from qwen2api.config import Settings, get_settings
 from qwen2api.job_queue import recover_pending_jobs
+from qwen2api.maintenance import cleanup_jobs, collect_failed_retry_candidates
 from qwen2api.main import create_app
 from qwen2api.qwen_adapter import NativeFlowResult
+from qwen2api.reporting import build_batch_report, render_batch_report_markdown
 from qwen2api.service import build_success_payload, serialize_job_payload
 from qwen2api.storage import (
+    batch_file,
     init_job_payload,
     job_dir,
     load_job,
     release_markdown_name_reservation,
     reserve_markdown_name,
+    save_batch,
     save_job,
 )
 
@@ -148,6 +152,53 @@ class TranscriptionApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["detail"]["code"], "MD_ONLY_OUTPUT")
 
+    def test_batch_report_endpoint_returns_markdown(self) -> None:
+        output_path = self.settings.outputs_dir / "课程?.md"
+        output_path.write_text("# done\n", encoding="utf-8")
+        job_payload = init_job_payload(
+            "job_report",
+            original_filename="课程?.mp4",
+            delete_remote=True,
+            account_id="",
+            account_strategy="round-robin",
+            queued=True,
+        )
+        job_payload.update(
+            {
+                "status": "succeeded",
+                "output_file": str(output_path),
+                "download_url": "/api/v1/jobs/job_report/file",
+            }
+        )
+        save_job(self.settings.jobs_dir, "job_report", job_payload)
+        save_batch(
+            self.settings.runtime_dir,
+            "batch_report",
+            {
+                "batch_id": "batch_report",
+                "total": 1,
+                "accepted": 1,
+                "format": "md",
+                "output_dir": str(self.settings.outputs_dir),
+                "items": [
+                    {
+                        "job_id": "job_report",
+                        "original_filename": "课程?.mp4",
+                        "markdown_filename": "课程?.md",
+                        "status": "queued",
+                        "job_url": "/api/v1/jobs/job_report",
+                        "download_url": "/api/v1/jobs/job_report/file",
+                        "suggested_poll_after_seconds": 60,
+                    }
+                ],
+            },
+        )
+
+        response = self.client.get("/api/v1/batches/batch_report/report?format=md")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Batch Report", response.text)
+        self.assertIn("课程?.md", response.text)
+
 
 class ServiceTests(unittest.TestCase):
     def test_build_success_payload_uses_suffix_when_flat_output_exists(self) -> None:
@@ -258,6 +309,72 @@ class ServiceTests(unittest.TestCase):
             requeued_running = load_job(settings.jobs_dir, "job_running")
             self.assertEqual(requeued_running["status"], "queued")
             self.assertTrue(requeued_running["meta"]["requeued_after_restart"])
+
+    def test_reporting_and_cleanup_helpers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            settings = make_settings(Path(tmp))
+
+            old_job_dir = job_dir(settings.jobs_dir, "job_old")
+            old_input = old_job_dir / "old.mp4"
+            old_input.write_bytes(b"old")
+            old_payload = init_job_payload(
+                "job_old",
+                original_filename="old.mp4",
+                delete_remote=True,
+                account_id="",
+                account_strategy="round-robin",
+                queued=True,
+            )
+            old_payload.update(
+                {
+                    "status": "failed",
+                    "created_at": "2026-01-01T00:00:00+00:00",
+                    "updated_at": "2026-01-01T00:00:00+00:00",
+                    "completed_at": "2026-01-01T00:00:00+00:00",
+                    "error": {"code": "TRANSCRIPTION_FAILED", "message": "boom"},
+                }
+            )
+            old_payload["meta"]["job_dir"] = str(old_job_dir)
+            old_payload["meta"]["input_file"] = str(old_input)
+            save_job(settings.jobs_dir, "job_old", old_payload)
+
+            batch_payload = {
+                "batch_id": "batch_old",
+                "total": 1,
+                "accepted": 1,
+                "format": "md",
+                "output_dir": str(settings.outputs_dir),
+                "items": [
+                    {
+                        "job_id": "job_old",
+                        "original_filename": "old.mp4",
+                        "markdown_filename": "old.md",
+                        "status": "failed",
+                        "job_url": "/api/v1/jobs/job_old",
+                        "download_url": "/api/v1/jobs/job_old/file",
+                        "suggested_poll_after_seconds": 60,
+                    }
+                ],
+            }
+            save_batch(settings.runtime_dir, "batch_old", batch_payload)
+
+            report = build_batch_report(settings, "batch_old")
+            markdown = render_batch_report_markdown(report)
+            self.assertEqual(report["counts"]["failed"], 1)
+            self.assertIn("Failed Items", markdown)
+
+            retries = collect_failed_retry_candidates(settings, "batch_old")
+            self.assertEqual(len(retries), 1)
+            self.assertEqual(retries[0].retry_path, str(old_input))
+
+            dry_run = cleanup_jobs(settings, older_than_hours=1, statuses={"failed"}, dry_run=True)
+            self.assertIn("job_old", dry_run["removed_jobs"])
+            self.assertTrue((settings.jobs_dir / "job_old").exists())
+
+            applied = cleanup_jobs(settings, older_than_hours=1, statuses={"failed"}, dry_run=False)
+            self.assertIn("job_old", applied["removed_jobs"])
+            self.assertFalse((settings.jobs_dir / "job_old").exists())
+            self.assertEqual(batch_file(settings.runtime_dir, "batch_old").exists(), False)
 
 
 if __name__ == "__main__":

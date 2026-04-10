@@ -3,9 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 
 from ..config import Settings, get_settings
+from ..maintenance import collect_failed_retry_candidates
+from ..reporting import build_batch_report, render_batch_report_markdown
 from ..job_queue import enqueue_job
 from ..schemas import (
     BatchJobItem,
@@ -499,6 +501,60 @@ async def get_batch(batch_id: str, settings: Settings = Depends(get_settings)) -
     refreshed = _refresh_batch_payload(settings, payload)
     save_batch(settings.runtime_dir, batch_id, refreshed)
     return BatchTranscriptionResponse(**refreshed)
+
+
+@router.get("/batches/{batch_id}/report", dependencies=[Depends(require_api_key)])
+async def get_batch_report(
+    batch_id: str,
+    format: str = "md",
+    settings: Settings = Depends(get_settings),
+):
+    try:
+        report = build_batch_report(settings, batch_id)
+    except FileNotFoundError as error:
+        raise HTTPException(
+            status_code=404,
+            detail={"message": f"Batch not found: {batch_id}", "code": "BATCH_NOT_FOUND"},
+        ) from error
+
+    normalized = format.strip().lower()
+    if normalized == "json":
+        return JSONResponse(report)
+    if normalized != "md":
+        raise HTTPException(
+            status_code=400,
+            detail={"message": "Unsupported report format", "code": "UNSUPPORTED_REPORT_FORMAT"},
+        )
+    return PlainTextResponse(render_batch_report_markdown(report), media_type="text/markdown; charset=utf-8")
+
+
+@router.get("/batches/{batch_id}/retry-candidates", dependencies=[Depends(require_api_key)])
+async def get_batch_retry_candidates(batch_id: str, settings: Settings = Depends(get_settings)) -> JSONResponse:
+    try:
+        candidates = collect_failed_retry_candidates(settings, batch_id)
+    except FileNotFoundError as error:
+        raise HTTPException(
+            status_code=404,
+            detail={"message": f"Batch not found: {batch_id}", "code": "BATCH_NOT_FOUND"},
+        ) from error
+
+    return JSONResponse(
+        {
+            "batch_id": batch_id,
+            "total": len(candidates),
+            "items": [
+                {
+                    "job_id": item.job_id,
+                    "original_filename": item.original_filename,
+                    "retry_path": item.retry_path,
+                    "account": item.account,
+                    "account_strategy": item.account_strategy,
+                    "delete_remote": item.delete_remote,
+                }
+                for item in candidates
+            ],
+        }
+    )
 
 
 @router.get("/jobs", response_model=TranscriptionListResponse, dependencies=[Depends(require_api_key)])

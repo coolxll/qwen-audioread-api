@@ -18,6 +18,8 @@
 - `POST /api/v1/transcriptions/batch`
 - `POST /api/v1/transcriptions/local/batch`
 - `GET /api/v1/batches/{batch_id}`
+- `GET /api/v1/batches/{batch_id}/report`
+- `GET /api/v1/batches/{batch_id}/retry-candidates`
 - `GET /api/v1/jobs`
 - `GET /api/v1/jobs/{job_id}`
 - `GET /api/v1/jobs/{job_id}/file`
@@ -222,22 +224,69 @@ PYTHONPATH=src python scripts/local_batch_submit.py \
 curl http://127.0.0.1:18000/api/v1/batches/<batch_id>
 ```
 
-### 9）查询全部任务
+### 9）导出批次报告
+
+Markdown：
+
+```bash
+curl 'http://127.0.0.1:18000/api/v1/batches/<batch_id>/report?format=md'
+```
+
+JSON：
+
+```bash
+curl 'http://127.0.0.1:18000/api/v1/batches/<batch_id>/report?format=json'
+```
+
+### 10）查看失败重试候选
+
+```bash
+curl 'http://127.0.0.1:18000/api/v1/batches/<batch_id>/retry-candidates'
+```
+
+### 11）查询全部任务
 
 ```bash
 curl http://127.0.0.1:18000/api/v1/jobs
 ```
 
-### 10）查询单个任务
+### 12）查询单个任务
 
 ```bash
 curl http://127.0.0.1:18000/api/v1/jobs/<job_id>
 ```
 
-### 11）下载 markdown
+### 13）下载 markdown
 
 ```bash
 curl -L http://127.0.0.1:18000/api/v1/jobs/<job_id>/file -o result.md
+```
+
+## 运维脚本
+
+导出批次报告：
+
+```bash
+cd /Users/gq/Projects/qwen2api
+PYTHONPATH=src python scripts/job_admin.py report --batch-id <batch_id>
+```
+
+清理历史 job，默认只做 dry-run：
+
+```bash
+PYTHONPATH=src python scripts/job_admin.py cleanup --older-than-hours 24
+```
+
+真正执行清理：
+
+```bash
+PYTHONPATH=src python scripts/job_admin.py cleanup --older-than-hours 24 --apply
+```
+
+重试某个批次中的失败任务：
+
+```bash
+PYTHONPATH=src python scripts/job_admin.py retry-failed --batch-id <batch_id>
 ```
 
 ## 推荐查询时间
