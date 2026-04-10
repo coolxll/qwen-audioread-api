@@ -55,10 +55,15 @@ class Settings:
     def runtime_dir(self) -> Path:
         return self.data_dir / "runtime"
 
+    @property
+    def outputs_dir(self) -> Path:
+        return self.data_dir / "outputs"
+
     def ensure_directories(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.jobs_dir.mkdir(parents=True, exist_ok=True)
         self.runtime_dir.mkdir(parents=True, exist_ok=True)
+        self.outputs_dir.mkdir(parents=True, exist_ok=True)
 
 
 @lru_cache(maxsize=1)

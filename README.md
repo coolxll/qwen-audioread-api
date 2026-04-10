@@ -14,6 +14,7 @@
 - `POST /api/v1/transcriptions`
 - `POST /api/v1/transcriptions/async`
 - `POST /api/v1/transcriptions/batch`
+- `GET /api/v1/batches/{batch_id}`
 - `GET /api/v1/jobs`
 - `GET /api/v1/jobs/{job_id}`
 - `GET /api/v1/jobs/{job_id}/file`
@@ -24,6 +25,8 @@
 - 调用 `qwen_web_capture` 真实链路完成上传、转写、导出
 - 导出格式固定为 `md`
 - 支持同步调用、异步调用、批量异步提交
+- 异步/批量返回推荐查询时间 `suggested_poll_after_seconds`
+- 批量任务支持 `batch_id` 查询
 - 本地保存 job 元数据、输入文件、输出文件、错误日志
 - 支持指定账号和账号策略
 - 可选 API Key 校验
@@ -36,6 +39,9 @@
 - 如果传 `docx` 等其他格式，会直接返回 `400`
 - 下载接口只返回 markdown 文件
 - 返回体中的 `format` 永远是 `md`
+- 成品统一平铺输出到 `data/outputs/`
+- 成品命名固定为 `原视频文件名.md`
+- 同名文件自动追加后缀，如 `课程-2.md`
 
 这能保证后续发布链路只处理一类文件。
 
@@ -46,6 +52,7 @@
 ├── src/qwen2api/
 ├── data/
 │   ├── jobs/
+│   ├── outputs/
 │   └── runtime/
 ├── pyproject.toml
 ├── .env.example
@@ -55,9 +62,11 @@
 说明：
 
 - `data/jobs/<job_id>/<原始文件名>`：上传的原始文件
-- `data/jobs/<job_id>/outputs/*.md`：导出的 markdown
+- `data/jobs/<job_id>/outputs/*.md`：底层导出过程中的中间产物
+- `data/outputs/<原视频文件名>.md`：最终发布用 markdown 成品
 - `data/jobs/<job_id>/job.json`：任务状态与结果
 - `data/jobs/<job_id>/error.txt`：失败时的错误摘要
+- `data/runtime/<batch_id>.json`：批次提交和查询视图
 - `data/runtime/`：账号轮询状态和 quota 状态
 
 ## 环境准备
@@ -120,6 +129,11 @@ curl -X POST http://127.0.0.1:18000/api/v1/transcriptions/async \
 
 返回 `202`，然后用 job 接口轮询。
 
+返回体会包含：
+
+- `markdown_filename`
+- `suggested_poll_after_seconds`
+
 ### 4）批量异步提交
 
 ```bash
@@ -129,23 +143,44 @@ curl -X POST http://127.0.0.1:18000/api/v1/transcriptions/batch \
   -F 'format=md'
 ```
 
-### 5）查询全部任务
+返回体会包含：
+
+- `batch_id`
+- `output_dir`
+- `items[].markdown_filename`
+- `items[].suggested_poll_after_seconds`
+
+### 5）查询批次
+
+```bash
+curl http://127.0.0.1:18000/api/v1/batches/<batch_id>
+```
+
+### 6）查询全部任务
 
 ```bash
 curl http://127.0.0.1:18000/api/v1/jobs
 ```
 
-### 6）查询单个任务
+### 7）查询单个任务
 
 ```bash
 curl http://127.0.0.1:18000/api/v1/jobs/<job_id>
 ```
 
-### 7）下载 markdown
+### 8）下载 markdown
 
 ```bash
 curl -L http://127.0.0.1:18000/api/v1/jobs/<job_id>/file -o result.md
 ```
+
+## 推荐查询时间
+
+异步与批量接口会直接返回 `suggested_poll_after_seconds`，当前采用轻量规则：
+
+- `<= 100MB`：60 秒
+- `100MB ~ 250MB`：90 秒
+- `> 250MB`：120 秒
 
 ## API Key
 
@@ -176,6 +211,7 @@ curl -L http://127.0.0.1:18000/api/v1/jobs/<job_id>/file -o result.md
 - 暂不支持取消任务
 - 暂不支持去重 / 断点续跑
 - 批量接口当前是“提交即排队”，不是复杂调度器
+- 批次查询视图基于已提交 jobs 聚合，不做更复杂的工作流编排
 - 仍然依赖底层登录态和 Qwen 网页接口可用
 
 ## 已验证情况

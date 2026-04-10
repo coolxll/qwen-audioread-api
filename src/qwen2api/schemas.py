@@ -18,6 +18,8 @@ class TranscriptionResult(BaseModel):
     job_id: str
     status: Literal["queued", "running", "succeeded", "failed"]
     format: Literal["md"]
+    markdown_filename: str | None = None
+    suggested_poll_after_seconds: int | None = None
     content_type: str | None = None
     text: str | None = None
     output_file: str | None = None
@@ -43,13 +45,17 @@ class TranscriptionListResponse(BaseModel):
 class BatchJobItem(BaseModel):
     job_id: str
     original_filename: str
+    markdown_filename: str
     status: Literal["queued", "running", "succeeded", "failed"]
     job_url: str
-    download_url: str | None = None
+    download_url: str
+    suggested_poll_after_seconds: int
 
 
 class BatchTranscriptionResponse(BaseModel):
+    batch_id: str
     total: int
     accepted: int
     format: Literal["md"]
+    output_dir: str
     items: list[BatchJobItem]
