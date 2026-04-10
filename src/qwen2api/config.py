@@ -30,6 +30,13 @@ def _load_dotenv(dotenv_path: Path) -> None:
         os.environ[key] = _strip_quotes(value.strip())
 
 
+def _resolve_path(value: str | Path, *, base_dir: Path) -> Path:
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = base_dir / path
+    return path.resolve()
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     project_root: Path
@@ -83,10 +90,8 @@ def get_settings() -> Settings:
     project_root = _project_root()
     _load_dotenv(project_root / ".env")
 
-    data_dir = Path(os.environ.get("QWEN2API_DATA_DIR", project_root / "data")).expanduser().resolve()
-    qwen_root = Path(
-        os.environ.get("QWEN2API_QWEN_ROOT", "/Users/gq/Projects/openclaw-qwen-web-capture-skill")
-    ).expanduser().resolve()
+    data_dir = _resolve_path(os.environ.get("QWEN2API_DATA_DIR", "data"), base_dir=project_root)
+    qwen_root = _resolve_path(os.environ.get("QWEN2API_QWEN_ROOT", "."), base_dir=project_root)
 
     settings = Settings(
         project_root=project_root,
@@ -98,13 +103,15 @@ def get_settings() -> Settings:
         delete_remote=os.environ.get("QWEN2API_DELETE_REMOTE", "true").strip().lower() in {"1", "true", "yes", "on"},
         export_concurrency=max(1, int(os.environ.get("QWEN2API_EXPORT_CONCURRENCY", "2"))),
         qwen_root=qwen_root,
-        qwen_dotenv_path=Path(os.environ.get("QWEN2API_QWEN_DOTENV", qwen_root / ".env")).expanduser().resolve(),
-        qwen_auth_state_path=Path(
-            os.environ.get("QWEN2API_QWEN_AUTH_STATE", qwen_root / ".auth/qwen-storage-state.json")
-        ).expanduser().resolve(),
-        qwen_accounts_file=Path(
-            os.environ.get("QWEN2API_QWEN_ACCOUNTS_FILE", qwen_root / "accounts.json")
-        ).expanduser().resolve(),
+        qwen_dotenv_path=_resolve_path(os.environ.get("QWEN2API_QWEN_DOTENV", ".env"), base_dir=project_root),
+        qwen_auth_state_path=_resolve_path(
+            os.environ.get("QWEN2API_QWEN_AUTH_STATE", ".auth/qwen-storage-state.json"),
+            base_dir=project_root,
+        ),
+        qwen_accounts_file=_resolve_path(
+            os.environ.get("QWEN2API_QWEN_ACCOUNTS_FILE", "accounts.json"),
+            base_dir=project_root,
+        ),
         qwen_account_pool_state_file=(data_dir / "runtime" / "account-pool-state.json").resolve(),
         qwen_quota_state_file=(data_dir / "runtime" / "quota-usage.json").resolve(),
         keep_job_text=os.environ.get("QWEN2API_KEEP_JOB_TEXT", "false").strip().lower() in {"1", "true", "yes", "on"},

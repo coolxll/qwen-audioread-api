@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -211,6 +212,37 @@ class TranscriptionApiTests(unittest.TestCase):
 
 
 class ServiceTests(unittest.TestCase):
+    def test_get_settings_uses_repo_relative_defaults(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".env").write_text(
+                "\n".join(
+                    [
+                        "QWEN2API_DATA_DIR=./custom-data",
+                        "QWEN2API_QWEN_ROOT=.",
+                        "QWEN2API_QWEN_DOTENV=.env",
+                        "QWEN2API_QWEN_AUTH_STATE=.auth/qwen-storage-state.json",
+                        "QWEN2API_QWEN_ACCOUNTS_FILE=accounts.json",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            with patch.dict(os.environ, {}, clear=True):
+                get_settings.cache_clear()
+                with patch("qwen2api.config._project_root", return_value=root):
+                    settings = get_settings()
+
+            self.assertEqual(settings.project_root, root)
+            self.assertEqual(settings.data_dir, (root / "custom-data").resolve())
+            self.assertEqual(settings.qwen_root, root.resolve())
+            self.assertEqual(settings.qwen_dotenv_path, (root / ".env").resolve())
+            self.assertEqual(settings.qwen_auth_state_path, (root / ".auth" / "qwen-storage-state.json").resolve())
+            self.assertEqual(settings.qwen_accounts_file, (root / "accounts.json").resolve())
+
+            get_settings.cache_clear()
+
     def test_build_success_payload_uses_suffix_when_flat_output_exists(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -1,0 +1,12 @@
+[
+  {
+    "id": "acc-1",
+    "label": "primary",
+    "storageStatePath": ".auth/account-1.json"
+  },
+  {
+    "id": "acc-2",
+    "label": "backup",
+    "storageStatePath": ".auth/account-2.json"
+  }
+]

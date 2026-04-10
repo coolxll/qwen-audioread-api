@@ -12,6 +12,7 @@ dependencies = [
   "uvicorn[standard]>=0.30,<1",
   "python-multipart>=0.0.9,<1",
   "pydantic>=2,<3",
+  "playwright>=1.52,<2",
 ]
 
 [tool.setuptools]

@@ -1,17 +1,28 @@
 # qwen2api
 
-一个面向本地/私有部署的原生 API 服务，用来把通义千问「音视频速读」网页链路包装成可调用的 HTTP 接口。
+`qwen2api` 是一个独立发布的 HTTP API 服务，用来把通义千问「音视频速读」能力包装成稳定的本地/私有接口。
+
+项目内置执行链路：
+
+- `src/qwen2api/`：API、队列、任务存储、批次视图、重试、报告
+- `src/qwen_web_capture/`：浏览器态执行、上传、轮询、导出
 
 补充文档：
 
+- [新手快速上手](./docs/QUICKSTART.md)
 - [API 文档](./docs/API.md)
 - [运维文档](./docs/OPERATIONS.md)
 
-当前版本重点面向**发布用途**，输出被强制收敛为：
+## 设计约束
 
-- **只产出 Markdown (`md`)**
+当前版本只产出 Markdown：
 
-不再支持 `docx` 导出，以避免后续发布工作流里出现多种格式分叉。
+- 接口层只接受 `md` / `markdown`
+- 返回体中的 `format` 永远是 `md`
+- 下载接口只返回 Markdown 文件
+- 最终成品统一输出到 `data/outputs/`
+
+这样可以保证后续发布链路只处理一种输出格式。
 
 ## 当前接口
 
@@ -31,100 +42,105 @@
 
 ## 当前能力
 
-- 接收单个音频/视频文件上传
-- 支持直接提交本地文件路径，绕过 multipart 大上传
-- 调用 `qwen_web_capture` 真实链路完成上传、转写、导出
-- 导出格式固定为 `md`
-- 支持同步调用、异步调用、批量异步提交
-- 异步任务改为进程内持久队列，服务重启后会自动捞起 `queued/running` job
-- 临时性失败支持自动重试
-- 异步/批量返回推荐查询时间 `suggested_poll_after_seconds`
-- 批量任务支持 `batch_id` 查询
-- 本地保存 job 元数据、输入文件、输出文件、错误日志
-- 支持指定账号和账号策略
+- 单文件上传 / 本地路径提交
+- 同步 / 异步 / 批量异步转写
+- 账号池与账号策略
+- 进程内持久队列与重启恢复
+- 失败自动重试
+- 批次报告与失败重试候选
 - 可选 API Key 校验
 
-## 输出约束
-
-这版开始，服务的输出约束如下：
-
-- 接口层只接受 `md` / `markdown`
-- 如果传 `docx` 等其他格式，会直接返回 `400`
-- 下载接口只返回 markdown 文件
-- 返回体中的 `format` 永远是 `md`
-- 成品统一平铺输出到 `data/outputs/`
-- 成品命名尽量保留原视频标题，仅替换少量路径非法字符
-- 同名文件自动追加后缀，如 `课程-2.md`
-- `job.json` 默认不再内嵌整份 markdown 正文，避免磁盘和列表查询膨胀
-
-这能保证后续发布链路只处理一类文件。
-
-## 目录说明
+## 项目目录
 
 ```text
-/Users/gq/Projects/qwen2api
-├── src/qwen2api/
+qwen2api/
+├── src/
+│   ├── qwen2api/
+│   └── qwen_web_capture/
+├── docs/
+├── scripts/
+├── tests/
 ├── data/
-│   ├── jobs/
-│   ├── outputs/
-│   └── runtime/
-├── pyproject.toml
 ├── .env.example
+├── accounts.example.json
 └── README.md
 ```
 
-说明：
+运行时目录说明：
 
-- `data/jobs/<job_id>/<原始文件名>`：上传模式下的临时副本，默认成功后清理
-- `data/jobs/<job_id>/outputs/*.md`：底层导出过程中的中间产物，默认成功后清理
-- `data/outputs/<原视频文件名>.md`：最终发布用 markdown 成品
-- `data/jobs/<job_id>/job.json`：任务状态与结果元数据，不重复存全文 markdown
-- `data/jobs/<job_id>/error.txt`：失败时的错误摘要
-- `data/runtime/<batch_id>.json`：批次提交和查询视图
-- `data/runtime/output-name-claims/`：输出文件名预留，避免并发同名冲突
-- `data/runtime/`：账号轮询状态和 quota 状态
+- `data/jobs/<job_id>/`：单任务工作目录
+- `data/outputs/`：最终 Markdown 成品
+- `data/runtime/`：批次视图、账号状态、quota 状态
+- `.auth/`：登录态文件目录，默认不纳入版本控制
+- `accounts.json`：多账号配置，默认不纳入版本控制
 
-## 环境准备
+## 快速开始
 
-先确认底层项目已经可用：
-
-- `/Users/gq/Projects/openclaw-qwen-web-capture-skill`
-- 其中登录态、`.env`、Playwright 依赖都已准备好
-
-建议先复制配置：
+### 1. 安装依赖
 
 ```bash
-cd /Users/gq/Projects/qwen2api
+python -m venv .venv
+source .venv/bin/activate
+pip install -e .
+playwright install chromium
+```
+
+### 2. 准备配置
+
+```bash
 cp .env.example .env
 ```
 
+默认情况下：
+
+- 服务配置和执行链路配置共用同一个 `.env`
+- 单账号登录态默认读取 `.auth/qwen-storage-state.json`
+- 多账号时可复制 `accounts.example.json` 为 `accounts.json` 后再修改
+- 默认直接使用仓库内置的 `src/qwen_web_capture/` 执行链路
+
 关键配置项：
 
-- `QWEN2API_QWEN_ROOT`：底层 Python 项目根目录
-- `QWEN2API_QWEN_DOTENV`：底层 `.env` 路径
-- `QWEN2API_QWEN_AUTH_STATE`：默认登录态文件
-- `QWEN2API_QWEN_ACCOUNTS_FILE`：账号池配置文件
-- `QWEN2API_DELETE_REMOTE`：是否默认删除远端记录
-- `QWEN2API_API_KEY`：可选 API Key
+- `QWEN2API_API_KEY`：可选接口鉴权
+- `QWEN2API_DELETE_REMOTE`：转写完成后是否删除远端记录
+- `QWEN2API_QWEN_AUTH_STATE`：单账号默认登录态
+- `QWEN2API_QWEN_ACCOUNTS_FILE`：多账号池配置
+- `QWEN2API_QWEN_DOTENV`：执行链路读取的环境变量文件
+- `QWEN2API_QWEN_ROOT`：可选；仅在你要切换到其他执行链路 checkout 时覆盖
 
-## 启动服务
-
-建议显式指定一个未被占用的端口，比如 `18000`：
+如果你使用多账号，建议补一份配置：
 
 ```bash
-cd /Users/gq/Projects/qwen2api
+cp accounts.example.json accounts.json
+```
+
+首次使用前，先生成登录态：
+
+```bash
+PYTHONPATH=src python scripts/login_qwen.py --out .auth/qwen-storage-state.json
+```
+
+如果是多账号，就分别执行：
+
+```bash
+PYTHONPATH=src python scripts/login_qwen.py --out .auth/account-1.json
+PYTHONPATH=src python scripts/login_qwen.py --out .auth/account-2.json
+```
+
+### 3. 启动服务
+
+```bash
 PYTHONPATH=src uvicorn qwen2api.main:app --host 0.0.0.0 --port 18000 --reload
 ```
 
 ## 接口示例
 
-### 1）健康检查
+### 健康检查
 
 ```bash
 curl http://127.0.0.1:18000/health
 ```
 
-### 2）同步转写
+### 同步转写
 
 ```bash
 curl -X POST http://127.0.0.1:18000/api/v1/transcriptions \
@@ -132,37 +148,7 @@ curl -X POST http://127.0.0.1:18000/api/v1/transcriptions \
   -F 'format=md'
 ```
 
-返回会阻塞到转写完成，适合小批量调用。
-
-### 3）本地路径同步转写
-
-```bash
-curl -X POST http://127.0.0.1:18000/api/v1/transcriptions/local \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "path": "/absolute/path/to/demo.mp4",
-    "format": "md"
-  }'
-```
-
-适合已经在本机磁盘上的大文件，避免额外上传副本。
-
-### 4）异步转写
-
-```bash
-curl -X POST http://127.0.0.1:18000/api/v1/transcriptions/async \
-  -F 'file=@/absolute/path/to/demo.mp4' \
-  -F 'format=md'
-```
-
-返回 `202`，然后用 job 接口轮询。
-
-返回体会包含：
-
-- `markdown_filename`
-- `suggested_poll_after_seconds`
-
-### 5）本地路径异步转写
+### 本地路径异步转写
 
 ```bash
 curl -X POST http://127.0.0.1:18000/api/v1/transcriptions/local/async \
@@ -173,25 +159,9 @@ curl -X POST http://127.0.0.1:18000/api/v1/transcriptions/local/async \
   }'
 ```
 
-这个接口会在创建 job 后直接返回，不受 multipart 上传时间影响。
+这里的 `path` 必须是**服务所在机器**上可直接访问的绝对路径。
 
-### 6）批量异步提交
-
-```bash
-curl -X POST http://127.0.0.1:18000/api/v1/transcriptions/batch \
-  -F 'files=@/absolute/path/to/a.mp4' \
-  -F 'files=@/absolute/path/to/b.mp4' \
-  -F 'format=md'
-```
-
-返回体会包含：
-
-- `batch_id`
-- `output_dir`
-- `items[].markdown_filename`
-- `items[].suggested_poll_after_seconds`
-
-### 7）本地路径批量异步提交
+### 批量异步提交
 
 ```bash
 curl -X POST http://127.0.0.1:18000/api/v1/transcriptions/local/batch \
@@ -205,18 +175,13 @@ curl -X POST http://127.0.0.1:18000/api/v1/transcriptions/local/batch \
   }'
 ```
 
-适合你这种本机已有大批量视频的场景。
-
-也可以直接用仓库脚本：
+也可以直接使用脚本：
 
 ```bash
-cd /Users/gq/Projects/qwen2api
-PYTHONPATH=src python scripts/local_batch_submit.py \
-  --paths-file /absolute/path/to/files.txt
+PYTHONPATH=src python scripts/local_batch_submit.py --paths-file /absolute/path/to/files.txt
 ```
 
-`files.txt` 每行一个本地视频路径。  
-如果要边跑边查批次状态：
+如果需要边跑边查：
 
 ```bash
 PYTHONPATH=src python scripts/local_batch_submit.py \
@@ -224,157 +189,23 @@ PYTHONPATH=src python scripts/local_batch_submit.py \
   --poll --interval 30
 ```
 
-### 8）查询批次
-
-```bash
-curl http://127.0.0.1:18000/api/v1/batches/<batch_id>
-```
-
-### 9）导出批次报告
-
-Markdown：
-
-```bash
-curl 'http://127.0.0.1:18000/api/v1/batches/<batch_id>/report?format=md'
-```
-
-JSON：
-
-```bash
-curl 'http://127.0.0.1:18000/api/v1/batches/<batch_id>/report?format=json'
-```
-
-报告中会包含：
-
-- 成功率 / 失败率 / 完成率
-- 批次总耗时、平均任务耗时、最慢/最快任务耗时
-- 输入文件总体积、平均体积
-- 失败原因分组
-- 来源模式分组（`upload` / `local_path`）
-
-### 10）查看失败重试候选
-
-```bash
-curl 'http://127.0.0.1:18000/api/v1/batches/<batch_id>/retry-candidates'
-```
-
-### 11）查询全部任务
-
-```bash
-curl http://127.0.0.1:18000/api/v1/jobs
-```
-
-### 12）查询单个任务
-
-```bash
-curl http://127.0.0.1:18000/api/v1/jobs/<job_id>
-```
-
-### 13）下载 markdown
-
-```bash
-curl -L http://127.0.0.1:18000/api/v1/jobs/<job_id>/file -o result.md
-```
-
 ## 运维脚本
 
 导出批次报告：
 
 ```bash
-cd /Users/gq/Projects/qwen2api
 PYTHONPATH=src python scripts/job_admin.py report --batch-id <batch_id>
 ```
 
-清理历史 job，默认只做 dry-run：
+清理历史 job：
 
 ```bash
 PYTHONPATH=src python scripts/job_admin.py cleanup --older-than-hours 24
-```
-
-真正执行清理：
-
-```bash
 PYTHONPATH=src python scripts/job_admin.py cleanup --older-than-hours 24 --apply
 ```
 
-重试某个批次中的失败任务：
+重试批次中的失败任务：
 
 ```bash
 PYTHONPATH=src python scripts/job_admin.py retry-failed --batch-id <batch_id>
 ```
-
-## 推荐查询时间
-
-异步与批量接口会直接返回 `suggested_poll_after_seconds`，当前采用轻量规则：
-
-- `<= 100MB`：60 秒
-- `100MB ~ 250MB`：90 秒
-- `> 250MB`：120 秒
-
-## 默认清理策略
-
-为控制磁盘占用，当前默认策略如下：
-
-- 上传模式生成的临时输入副本：成功后删除
-- job 目录下中间 `outputs/`：成功后删除
-- `job.json`：只保留元数据，不重复存整份 markdown 正文
-- 最终成品：始终保留在 `data/outputs/`
-
-如需保留，可通过环境变量开启：
-
-- `QWEN2API_KEEP_JOB_TEXT=true`
-- `QWEN2API_KEEP_UPLOADED_INPUT=true`
-- `QWEN2API_KEEP_INTERMEDIATE_OUTPUTS=true`
-
-队列 worker 数量可通过以下配置调整：
-
-- `QWEN2API_JOB_WORKERS=2`
-
-自动重试相关配置：
-
-- `QWEN2API_MAX_RETRIES=2`
-- `QWEN2API_RETRY_DELAY_SECONDS=30`
-- `QWEN2API_RETRYABLE_ERROR_CODES=TRANSCRIPTION_TIMEOUT,RATE_LIMITED,TRANSCRIPTION_FAILED`
-
-## API Key
-
-如果设置了 `QWEN2API_API_KEY`，请求时需要携带任一头：
-
-```bash
--H 'Authorization: Bearer your-key'
-```
-
-或：
-
-```bash
--H 'X-API-Key: your-key'
-```
-
-## 状态说明
-
-任务状态当前有 4 类：
-
-- `queued`：已创建，等待后台执行
-- `running`：执行中
-- `succeeded`：成功，且已产出 markdown
-- `failed`：失败
-
-## 当前限制
-
-- 输出格式固定为 `md`
-- 暂不支持取消任务
-- 暂不支持去重 / 断点续跑
-- 批量接口当前是“提交即排队”，不是复杂调度器
-- 批次查询视图基于已提交 jobs 聚合，不做更复杂的工作流编排
-- 上传式异步接口仍然要先完成 HTTP 文件上传，本地路径接口才是“创建即返回”
-- 仍然依赖底层登录态和 Qwen 网页接口可用
-
-## 已验证情况
-
-在真实 mp4 文件下，已经完成过：
-
-- 8 个视频样本
-- 并发数 3
-- 成功 8 / 失败 0
-
-说明当前版本已经适合继续往“发布前转写流水线”方向演进。

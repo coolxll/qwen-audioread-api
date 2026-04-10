@@ -4,6 +4,7 @@
 
 - Base URL：`http://127.0.0.1:18000`
 - 输出格式：仅支持 `md`
+- 本地路径接口中的 `path` / `paths` 必须是服务所在机器可读的绝对路径
 - 鉴权：如配置 `QWEN2API_API_KEY`，可使用：
   - `Authorization: Bearer <key>`
   - `X-API-Key: <key>`
@@ -38,8 +39,8 @@
 
 ### `POST /api/v1/transcriptions/async`
 
-异步转写。  
-注意：上传模式下，HTTP 大文件上传仍然要先完成，接口才会返回 `202`。
+异步转写。
+注意：上传模式下，HTTP 大文件上传仍要先完成，接口才会返回 `202`。
 
 返回关键字段：
 
@@ -64,7 +65,7 @@
 
 ## 3. 本地路径模式
 
-适合“文件已在本机磁盘上”的场景，不需要再做 HTTP 大文件上传。
+适合“文件已经在服务所在机器磁盘上”的场景，不需要再走 HTTP 大文件上传。
 
 ### `POST /api/v1/transcriptions/local`
 
@@ -82,7 +83,7 @@
 
 ### `POST /api/v1/transcriptions/local/async`
 
-本地路径异步提交。  
+本地路径异步提交。
 这类接口会更快返回，因为不走 multipart 上传。
 
 ### `POST /api/v1/transcriptions/local/batch`
@@ -126,7 +127,7 @@
 
 ### `GET /api/v1/batches/{batch_id}/retry-candidates`
 
-列出该批次中当前可用于重试的失败任务候选。
+列出该批次当前可用于重试的失败任务候选。
 
 ---
 
@@ -159,7 +160,7 @@
 
 ### `markdown_filename`
 
-最终目标 Markdown 文件名。  
+最终目标 Markdown 文件名。
 系统会尽量保留原始标题，并在重名时自动追加后缀。
 
 ### `suggested_poll_after_seconds`
@@ -188,4 +189,3 @@
 - `LOCAL_FILE_INVALID`
 - `EMPTY_PATHS`
 - `UNSUPPORTED_REPORT_FORMAT`
-
