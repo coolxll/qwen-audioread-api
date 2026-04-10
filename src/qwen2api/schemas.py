@@ -14,6 +14,22 @@ class ErrorDetail(BaseModel):
     code: str = "INTERNAL_ERROR"
 
 
+class LocalTranscriptionRequest(BaseModel):
+    path: str
+    format: str | None = "md"
+    delete_remote: bool | None = None
+    account: str = ""
+    account_strategy: str = "round-robin"
+
+
+class LocalBatchTranscriptionRequest(BaseModel):
+    paths: list[str]
+    format: str | None = "md"
+    delete_remote: bool | None = None
+    account: str = ""
+    account_strategy: str = "round-robin"
+
+
 class TranscriptionResult(BaseModel):
     job_id: str
     status: Literal["queued", "running", "succeeded", "failed"]

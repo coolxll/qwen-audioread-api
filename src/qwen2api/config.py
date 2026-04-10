@@ -46,6 +46,9 @@ class Settings:
     qwen_accounts_file: Path
     qwen_account_pool_state_file: Path
     qwen_quota_state_file: Path
+    keep_job_text: bool
+    keep_uploaded_input: bool
+    keep_intermediate_outputs: bool
 
     @property
     def jobs_dir(self) -> Path:
@@ -59,11 +62,16 @@ class Settings:
     def outputs_dir(self) -> Path:
         return self.data_dir / "outputs"
 
+    @property
+    def output_name_claims_dir(self) -> Path:
+        return self.runtime_dir / "output-name-claims"
+
     def ensure_directories(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.jobs_dir.mkdir(parents=True, exist_ok=True)
         self.runtime_dir.mkdir(parents=True, exist_ok=True)
         self.outputs_dir.mkdir(parents=True, exist_ok=True)
+        self.output_name_claims_dir.mkdir(parents=True, exist_ok=True)
 
 
 @lru_cache(maxsize=1)
@@ -95,6 +103,11 @@ def get_settings() -> Settings:
         ).expanduser().resolve(),
         qwen_account_pool_state_file=(data_dir / "runtime" / "account-pool-state.json").resolve(),
         qwen_quota_state_file=(data_dir / "runtime" / "quota-usage.json").resolve(),
+        keep_job_text=os.environ.get("QWEN2API_KEEP_JOB_TEXT", "false").strip().lower() in {"1", "true", "yes", "on"},
+        keep_uploaded_input=os.environ.get("QWEN2API_KEEP_UPLOADED_INPUT", "false").strip().lower()
+        in {"1", "true", "yes", "on"},
+        keep_intermediate_outputs=os.environ.get("QWEN2API_KEEP_INTERMEDIATE_OUTPUTS", "false").strip().lower()
+        in {"1", "true", "yes", "on"},
     )
     settings.ensure_directories()
     return settings

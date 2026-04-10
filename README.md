@@ -12,8 +12,11 @@
 
 - `GET /health`
 - `POST /api/v1/transcriptions`
+- `POST /api/v1/transcriptions/local`
 - `POST /api/v1/transcriptions/async`
+- `POST /api/v1/transcriptions/local/async`
 - `POST /api/v1/transcriptions/batch`
+- `POST /api/v1/transcriptions/local/batch`
 - `GET /api/v1/batches/{batch_id}`
 - `GET /api/v1/jobs`
 - `GET /api/v1/jobs/{job_id}`
@@ -22,6 +25,7 @@
 ## 当前能力
 
 - 接收单个音频/视频文件上传
+- 支持直接提交本地文件路径，绕过 multipart 大上传
 - 调用 `qwen_web_capture` 真实链路完成上传、转写、导出
 - 导出格式固定为 `md`
 - 支持同步调用、异步调用、批量异步提交
@@ -40,8 +44,9 @@
 - 下载接口只返回 markdown 文件
 - 返回体中的 `format` 永远是 `md`
 - 成品统一平铺输出到 `data/outputs/`
-- 成品命名固定为 `原视频文件名.md`
+- 成品命名尽量保留原视频标题，仅替换少量路径非法字符
 - 同名文件自动追加后缀，如 `课程-2.md`
+- `job.json` 默认不再内嵌整份 markdown 正文，避免磁盘和列表查询膨胀
 
 这能保证后续发布链路只处理一类文件。
 
@@ -61,12 +66,13 @@
 
 说明：
 
-- `data/jobs/<job_id>/<原始文件名>`：上传的原始文件
-- `data/jobs/<job_id>/outputs/*.md`：底层导出过程中的中间产物
+- `data/jobs/<job_id>/<原始文件名>`：上传模式下的临时副本，默认成功后清理
+- `data/jobs/<job_id>/outputs/*.md`：底层导出过程中的中间产物，默认成功后清理
 - `data/outputs/<原视频文件名>.md`：最终发布用 markdown 成品
-- `data/jobs/<job_id>/job.json`：任务状态与结果
+- `data/jobs/<job_id>/job.json`：任务状态与结果元数据，不重复存全文 markdown
 - `data/jobs/<job_id>/error.txt`：失败时的错误摘要
 - `data/runtime/<batch_id>.json`：批次提交和查询视图
+- `data/runtime/output-name-claims/`：输出文件名预留，避免并发同名冲突
 - `data/runtime/`：账号轮询状态和 quota 状态
 
 ## 环境准备
@@ -119,7 +125,20 @@ curl -X POST http://127.0.0.1:18000/api/v1/transcriptions \
 
 返回会阻塞到转写完成，适合小批量调用。
 
-### 3）异步转写
+### 3）本地路径同步转写
+
+```bash
+curl -X POST http://127.0.0.1:18000/api/v1/transcriptions/local \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "path": "/absolute/path/to/demo.mp4",
+    "format": "md"
+  }'
+```
+
+适合已经在本机磁盘上的大文件，避免额外上传副本。
+
+### 4）异步转写
 
 ```bash
 curl -X POST http://127.0.0.1:18000/api/v1/transcriptions/async \
@@ -134,7 +153,20 @@ curl -X POST http://127.0.0.1:18000/api/v1/transcriptions/async \
 - `markdown_filename`
 - `suggested_poll_after_seconds`
 
-### 4）批量异步提交
+### 5）本地路径异步转写
+
+```bash
+curl -X POST http://127.0.0.1:18000/api/v1/transcriptions/local/async \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "path": "/absolute/path/to/demo.mp4",
+    "format": "md"
+  }'
+```
+
+这个接口会在创建 job 后直接返回，不受 multipart 上传时间影响。
+
+### 6）批量异步提交
 
 ```bash
 curl -X POST http://127.0.0.1:18000/api/v1/transcriptions/batch \
@@ -150,25 +182,41 @@ curl -X POST http://127.0.0.1:18000/api/v1/transcriptions/batch \
 - `items[].markdown_filename`
 - `items[].suggested_poll_after_seconds`
 
-### 5）查询批次
+### 7）本地路径批量异步提交
+
+```bash
+curl -X POST http://127.0.0.1:18000/api/v1/transcriptions/local/batch \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "paths": [
+      "/absolute/path/to/a.mp4",
+      "/absolute/path/to/b.mp4"
+    ],
+    "format": "md"
+  }'
+```
+
+适合你这种本机已有大批量视频的场景。
+
+### 8）查询批次
 
 ```bash
 curl http://127.0.0.1:18000/api/v1/batches/<batch_id>
 ```
 
-### 6）查询全部任务
+### 9）查询全部任务
 
 ```bash
 curl http://127.0.0.1:18000/api/v1/jobs
 ```
 
-### 7）查询单个任务
+### 10）查询单个任务
 
 ```bash
 curl http://127.0.0.1:18000/api/v1/jobs/<job_id>
 ```
 
-### 8）下载 markdown
+### 11）下载 markdown
 
 ```bash
 curl -L http://127.0.0.1:18000/api/v1/jobs/<job_id>/file -o result.md
@@ -181,6 +229,21 @@ curl -L http://127.0.0.1:18000/api/v1/jobs/<job_id>/file -o result.md
 - `<= 100MB`：60 秒
 - `100MB ~ 250MB`：90 秒
 - `> 250MB`：120 秒
+
+## 默认清理策略
+
+为控制磁盘占用，当前默认策略如下：
+
+- 上传模式生成的临时输入副本：成功后删除
+- job 目录下中间 `outputs/`：成功后删除
+- `job.json`：只保留元数据，不重复存整份 markdown 正文
+- 最终成品：始终保留在 `data/outputs/`
+
+如需保留，可通过环境变量开启：
+
+- `QWEN2API_KEEP_JOB_TEXT=true`
+- `QWEN2API_KEEP_UPLOADED_INPUT=true`
+- `QWEN2API_KEEP_INTERMEDIATE_OUTPUTS=true`
 
 ## API Key
 
@@ -212,6 +275,7 @@ curl -L http://127.0.0.1:18000/api/v1/jobs/<job_id>/file -o result.md
 - 暂不支持去重 / 断点续跑
 - 批量接口当前是“提交即排队”，不是复杂调度器
 - 批次查询视图基于已提交 jobs 聚合，不做更复杂的工作流编排
+- 上传式异步接口仍然要先完成 HTTP 文件上传，本地路径接口才是“创建即返回”
 - 仍然依赖底层登录态和 Qwen 网页接口可用
 
 ## 已验证情况

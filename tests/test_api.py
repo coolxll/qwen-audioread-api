@@ -10,8 +10,8 @@ from fastapi.testclient import TestClient
 from qwen2api.config import Settings, get_settings
 from qwen2api.main import create_app
 from qwen2api.qwen_adapter import NativeFlowResult
-from qwen2api.service import build_success_payload
-from qwen2api.storage import init_job_payload
+from qwen2api.service import build_success_payload, serialize_job_payload
+from qwen2api.storage import init_job_payload, release_markdown_name_reservation, reserve_markdown_name
 
 
 def make_settings(root: Path) -> Settings:
@@ -31,6 +31,9 @@ def make_settings(root: Path) -> Settings:
         qwen_accounts_file=root / "accounts.json",
         qwen_account_pool_state_file=data_dir / "runtime" / "account-pool-state.json",
         qwen_quota_state_file=data_dir / "runtime" / "quota-usage.json",
+        keep_job_text=False,
+        keep_uploaded_input=False,
+        keep_intermediate_outputs=False,
     )
     settings.ensure_directories()
     return settings
@@ -72,13 +75,13 @@ class TranscriptionApiTests(unittest.TestCase):
             response = self.client.post(
                 "/api/v1/transcriptions",
                 data={"format": "md"},
-                files={"file": ("demo.mp4", b"video-bytes", "video/mp4")},
+                files={"file": ("课程?.mp4", b"video-bytes", "video/mp4")},
             )
 
         self.assertEqual(response.status_code, 200)
         body = response.json()
         self.assertEqual(body["format"], "md")
-        self.assertEqual(body["markdown_filename"], "demo.md")
+        self.assertEqual(body["markdown_filename"], "课程?.md")
         self.assertEqual(body["suggested_poll_after_seconds"], 60)
 
     def test_async_transcription_returns_queue_metadata(self) -> None:
@@ -86,39 +89,44 @@ class TranscriptionApiTests(unittest.TestCase):
             response = self.client.post(
                 "/api/v1/transcriptions/async",
                 data={"format": "md"},
-                files={"file": ("demo.mp4", b"video-bytes", "video/mp4")},
+                files={"file": ("课程?.mp4", b"video-bytes", "video/mp4")},
             )
 
         self.assertEqual(response.status_code, 202)
         body = response.json()
         self.assertEqual(body["status"], "queued")
-        self.assertEqual(body["markdown_filename"], "demo.md")
+        self.assertEqual(body["markdown_filename"], "课程?.md")
         self.assertEqual(body["suggested_poll_after_seconds"], 60)
 
-    def test_batch_submission_and_batch_lookup(self) -> None:
+    def test_local_batch_submission_uses_source_paths_and_returns_unique_names(self) -> None:
+        left_dir = self.root / "left"
+        right_dir = self.root / "right"
+        left_dir.mkdir()
+        right_dir.mkdir()
+        left_file = left_dir / "课程?.mp4"
+        right_file = right_dir / "课程?.mp4"
+        left_file.write_bytes(b"a")
+        right_file.write_bytes(b"b")
+
         with patch("qwen2api.api.transcriptions.run_transcription_background", new=AsyncMock(return_value=None)):
             response = self.client.post(
-                "/api/v1/transcriptions/batch",
-                data={"format": "md"},
-                files=[
-                    ("files", ("课程.mp4", b"a", "video/mp4")),
-                    ("files", ("课程.mp4", b"b", "video/mp4")),
-                ],
+                "/api/v1/transcriptions/local/batch",
+                json={
+                    "paths": [str(left_file), str(right_file)],
+                    "format": "md",
+                },
             )
 
         self.assertEqual(response.status_code, 202)
         body = response.json()
-        self.assertIn("batch_id", body)
-        self.assertEqual(body["output_dir"], str(self.settings.outputs_dir))
-        self.assertEqual(body["items"][0]["markdown_filename"], "课程.md")
-        self.assertEqual(body["items"][1]["markdown_filename"], "课程-2.md")
-        self.assertEqual(body["items"][0]["suggested_poll_after_seconds"], 60)
+        self.assertEqual(body["items"][0]["markdown_filename"], "课程?.md")
+        self.assertEqual(body["items"][1]["markdown_filename"], "课程?-2.md")
 
-        batch_response = self.client.get(f"/api/v1/batches/{body['batch_id']}")
-        self.assertEqual(batch_response.status_code, 200)
-        batch_body = batch_response.json()
-        self.assertEqual(batch_body["batch_id"], body["batch_id"])
-        self.assertEqual(len(batch_body["items"]), 2)
+        first_job_id = body["items"][0]["job_id"]
+        first_job = self.client.get(f"/api/v1/jobs/{first_job_id}").json()
+        self.assertEqual(first_job["meta"]["source_mode"], "local_path")
+        self.assertEqual(first_job["meta"]["source_path"], str(left_file.resolve()))
+        self.assertFalse(first_job["meta"]["delete_input_after_success"])
 
     def test_non_md_format_rejected(self) -> None:
         response = self.client.post(
@@ -135,23 +143,24 @@ class ServiceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             settings = make_settings(root)
-            existing_output = settings.outputs_dir / "课程.md"
+            existing_output = settings.outputs_dir / "课程?.md"
             existing_output.write_text("old\n", encoding="utf-8")
 
             source_dir = root / "job" / "outputs"
             source_dir.mkdir(parents=True, exist_ok=True)
-            export_path = source_dir / "课程.md"
+            export_path = source_dir / "课程?.md"
             export_path.write_text("new\n", encoding="utf-8")
+            export_path.with_suffix(".md.meta.json").write_text("{}", encoding="utf-8")
 
             job_payload = init_job_payload(
                 "job-test",
-                original_filename="课程.mp4",
+                original_filename="课程?.mp4",
                 delete_remote=True,
                 account_id="",
                 account_strategy="round-robin",
                 queued=False,
                 suggested_poll_seconds=60,
-                target_markdown_name="课程.md",
+                target_markdown_name="课程?.md",
             )
 
             result = build_success_payload(
@@ -167,9 +176,33 @@ class ServiceTests(unittest.TestCase):
                 ),
             )
 
-            self.assertEqual(result["markdown_filename"], "课程-2.md")
-            self.assertEqual(Path(result["output_file"]).name, "课程-2.md")
+            self.assertEqual(result["markdown_filename"], "课程?-2.md")
+            self.assertEqual(Path(result["output_file"]).name, "课程?-2.md")
             self.assertEqual(existing_output.read_text(encoding="utf-8"), "old\n")
+            self.assertFalse((settings.outputs_dir / "课程?-2.md.meta.json").exists())
+
+    def test_serialize_job_payload_drops_text_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            settings = make_settings(Path(tmp))
+            payload = {
+                "job_id": "job-1",
+                "status": "succeeded",
+                "format": "md",
+                "text": "# content\n",
+                "meta": {},
+            }
+            stored = serialize_job_payload(settings, payload)
+            self.assertIsNone(stored["text"])
+
+    def test_reserve_markdown_name_prevents_cross_request_collisions(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            settings = make_settings(Path(tmp))
+            name1 = reserve_markdown_name(settings.runtime_dir, settings.outputs_dir, "课程?.mp4")
+            name2 = reserve_markdown_name(settings.runtime_dir, settings.outputs_dir, "课程?.mp4")
+            self.assertEqual(name1, "课程?.md")
+            self.assertEqual(name2, "课程?-2.md")
+            release_markdown_name_reservation(settings.runtime_dir, name1)
+            release_markdown_name_reservation(settings.runtime_dir, name2)
 
 
 if __name__ == "__main__":

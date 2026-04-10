@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 import json
 import shutil
+import unicodedata
 import uuid
 
 from fastapi import UploadFile
@@ -38,8 +39,31 @@ def sanitize_filename(filename: str) -> str:
     return f"{normalized}{suffix}"
 
 
+def sanitize_publish_filename(filename: str) -> str:
+    path = Path(filename or "upload.bin")
+    stem = path.stem or "upload"
+    suffix = path.suffix or ".bin"
+    replacements = {
+        "/": "／",
+        "\\": "＼",
+        ":": "：",
+        "\x00": "",
+    }
+    safe: list[str] = []
+    for ch in stem:
+        if ch in replacements:
+            safe.append(replacements[ch])
+            continue
+        if unicodedata.category(ch).startswith("C"):
+            safe.append(" ")
+            continue
+        safe.append(ch)
+    normalized = "".join(safe).strip().rstrip(".") or "upload"
+    return f"{normalized}{suffix}"
+
+
 def markdown_filename(original_filename: str) -> str:
-    safe = sanitize_filename(original_filename)
+    safe = sanitize_publish_filename(original_filename)
     return f"{Path(safe).stem}.md"
 
 
@@ -79,6 +103,39 @@ def job_file(base_dir: Path, job_id: str) -> Path:
 def batch_file(runtime_dir: Path, batch_id: str) -> Path:
     runtime_dir.mkdir(parents=True, exist_ok=True)
     return (runtime_dir / f"{batch_id}.json").resolve()
+
+
+def reservation_file(runtime_dir: Path, markdown_name: str) -> Path:
+    reservation_dir = (runtime_dir / "output-name-claims").resolve()
+    reservation_dir.mkdir(parents=True, exist_ok=True)
+    return reservation_dir / f"{markdown_name}.claim"
+
+
+def reserve_markdown_name(runtime_dir: Path, outputs_dir: Path, original_filename: str) -> str:
+    base_name = markdown_filename(original_filename)
+    stem = Path(base_name).stem
+    suffix = Path(base_name).suffix
+    index = 1
+    while True:
+        candidate = base_name if index == 1 else f"{stem}-{index}{suffix}"
+        target = outputs_dir / candidate
+        claim = reservation_file(runtime_dir, candidate)
+        if target.exists():
+            index += 1
+            continue
+        try:
+            with claim.open("x", encoding="utf-8") as handle:
+                handle.write(utc_now())
+            return candidate
+        except FileExistsError:
+            index += 1
+
+
+def release_markdown_name_reservation(runtime_dir: Path, markdown_name: str | None) -> None:
+    if not markdown_name:
+        return
+    claim = reservation_file(runtime_dir, markdown_name)
+    claim.unlink(missing_ok=True)
 
 
 def load_job(base_dir: Path, job_id: str) -> dict:

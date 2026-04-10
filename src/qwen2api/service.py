@@ -1,11 +1,18 @@
 from __future__ import annotations
 
-from pathlib import Path
 import mimetypes
+import shutil
+from pathlib import Path
 
 from .config import Settings
 from .qwen_adapter import NativeFlowResult, transcribe_via_qwen
-from .storage import mark_job_running, next_available_markdown_name, save_job, utc_now
+from .storage import (
+    mark_job_running,
+    next_available_markdown_name,
+    release_markdown_name_reservation,
+    save_job,
+    utc_now,
+)
 
 
 def move_output_to_flat_dir(
@@ -13,21 +20,53 @@ def move_output_to_flat_dir(
     settings: Settings,
     flow_result: NativeFlowResult,
     target_markdown_name: str,
-    original_filename: str,
 ) -> Path:
     source = flow_result.export_path.resolve()
     target = settings.outputs_dir / target_markdown_name
     if target.exists() and target != source:
         target = settings.outputs_dir / next_available_markdown_name(
             settings.outputs_dir,
-            original_filename,
+            target_markdown_name,
         )
     if target != source:
         source.replace(target)
         sidecar = source.with_suffix(source.suffix + ".meta.json")
         if sidecar.exists():
-            sidecar.replace(target.with_suffix(target.suffix + ".meta.json"))
+            sidecar.unlink()
     return target
+
+
+def cleanup_job_artifacts(settings: Settings, payload: dict) -> dict:
+    meta = {**payload.get("meta", {})}
+    input_file = meta.get("input_file")
+    delete_input_after_success = bool(meta.get("delete_input_after_success"))
+    if delete_input_after_success and input_file:
+        input_path = Path(input_file)
+        if input_path.exists():
+            input_path.unlink()
+            meta["uploaded_input_removed"] = True
+
+    job_dir_value = meta.get("job_dir")
+    if job_dir_value and not settings.keep_intermediate_outputs:
+        outputs_dir = Path(job_dir_value) / "outputs"
+        if outputs_dir.exists():
+            shutil.rmtree(outputs_dir)
+            meta["intermediate_outputs_removed"] = True
+
+    return {
+        **payload,
+        "meta": meta,
+    }
+
+
+def serialize_job_payload(settings: Settings, payload: dict) -> dict:
+    stored = {
+        **payload,
+        "meta": dict(payload.get("meta", {})),
+    }
+    if not settings.keep_job_text:
+        stored["text"] = None
+    return stored
 
 
 async def run_transcription(
@@ -41,7 +80,8 @@ async def run_transcription(
     account_strategy: str,
 ) -> dict:
     running_payload = mark_job_running(job_payload)
-    save_job(settings.jobs_dir, job_payload["job_id"], running_payload)
+    save_job(settings.jobs_dir, job_payload["job_id"], serialize_job_payload(settings, running_payload))
+    reserved_markdown_name = running_payload.get("meta", {}).get("target_markdown_name")
     try:
         flow_result = await transcribe_via_qwen(
             settings=settings,
@@ -53,10 +93,13 @@ async def run_transcription(
             account_strategy=account_strategy,
         )
         payload = build_success_payload(settings=settings, job_payload=running_payload, flow_result=flow_result)
+        payload = cleanup_job_artifacts(settings, payload)
     except Exception as error:  # noqa: BLE001
         payload = build_error_payload(running_payload, error)
         (job_dir / "error.txt").write_text(f"{type(error).__name__}: {error}\n", encoding="utf-8")
-    save_job(settings.jobs_dir, running_payload["job_id"], payload)
+    finally:
+        release_markdown_name_reservation(settings.runtime_dir, reserved_markdown_name)
+    save_job(settings.jobs_dir, running_payload["job_id"], serialize_job_payload(settings, payload))
     return payload
 
 
@@ -90,7 +133,6 @@ def build_success_payload(*, settings: Settings, job_payload: dict, flow_result:
         settings=settings,
         flow_result=flow_result,
         target_markdown_name=target_markdown_name,
-        original_filename=job_payload["original_filename"],
     )
     final_markdown_name = output_file.name
     text = output_file.read_text(encoding="utf-8") if output_file.suffix.lower() == ".md" else None
