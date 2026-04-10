@@ -171,8 +171,13 @@ class TranscriptionApiTests(unittest.TestCase):
                 "status": "succeeded",
                 "output_file": str(output_path),
                 "download_url": "/api/v1/jobs/job_report/file",
+                "completed_at": "2026-04-10T00:01:00+00:00",
+                "updated_at": "2026-04-10T00:01:00+00:00",
             }
         )
+        job_payload["created_at"] = "2026-04-10T00:00:00+00:00"
+        job_payload["meta"]["file_size_bytes"] = 10 * 1024 * 1024
+        job_payload["meta"]["source_mode"] = "local_path"
         save_job(self.settings.jobs_dir, "job_report", job_payload)
         save_batch(
             self.settings.runtime_dir,
@@ -201,6 +206,8 @@ class TranscriptionApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("Batch Report", response.text)
         self.assertIn("课程?.md", response.text)
+        self.assertIn("Success rate", response.text)
+        self.assertIn("Source Modes", response.text)
 
 
 class ServiceTests(unittest.TestCase):
@@ -374,6 +381,8 @@ class ServiceTests(unittest.TestCase):
             )
             old_payload["meta"]["job_dir"] = str(old_job_dir)
             old_payload["meta"]["input_file"] = str(old_input)
+            old_payload["meta"]["file_size_bytes"] = 50 * 1024 * 1024
+            old_payload["meta"]["source_mode"] = "local_path"
             save_job(settings.jobs_dir, "job_old", old_payload)
 
             batch_payload = {
@@ -399,7 +408,12 @@ class ServiceTests(unittest.TestCase):
             report = build_batch_report(settings, "batch_old")
             markdown = render_batch_report_markdown(report)
             self.assertEqual(report["counts"]["failed"], 1)
+            self.assertEqual(report["rates"]["failure_rate_percent"], 100.0)
+            self.assertEqual(report["error_groups"]["TRANSCRIPTION_FAILED"], 1)
+            self.assertEqual(report["source_mode_groups"]["local_path"], 1)
+            self.assertEqual(report["sizes"]["total_input_size_mb"], 50.0)
             self.assertIn("Failed Items", markdown)
+            self.assertIn("Failure Groups", markdown)
 
             retries = collect_failed_retry_candidates(settings, "batch_old")
             self.assertEqual(len(retries), 1)
