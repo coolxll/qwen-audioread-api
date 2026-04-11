@@ -265,7 +265,10 @@ class ServiceTests(unittest.TestCase):
             from qwen2api.qwen_adapter import load_qwen_bundle
 
             bundle = load_qwen_bundle(settings)
+            self.assertEqual(bundle.load_dotenv.__module__, "qwen_http_runtime.runtime")
+            self.assertEqual(bundle.resolve_execution_accounts.__module__, "qwen_http_runtime.accounts")
             self.assertEqual(bundle.run_real_flow.__module__, "qwen_http_runtime.flow")
+            self.assertEqual(bundle.write_result_metadata.__module__, "qwen_http_runtime.result_metadata")
 
     def test_build_success_payload_uses_suffix_when_flat_output_exists(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

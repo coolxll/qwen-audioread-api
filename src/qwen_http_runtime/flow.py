@@ -12,9 +12,9 @@ import uuid
 from urllib import error as urllib_error
 from urllib import request as urllib_request
 
-from qwen_web_capture.http import download_file
-from qwen_web_capture.oss_upload import upload_file_to_oss
-from qwen_web_capture.runtime import ExportConfig, ensure_dir, guess_mime_type, now_stamp
+from .http import download_file
+from .oss_upload import upload_file_to_oss
+from .runtime import ExportConfig, ensure_dir, guess_mime_type, now_stamp
 
 
 QUOTA_URL = "https://www.qianwen.com/zhiwen/api/equity/get_quota?c=tongyi-web"

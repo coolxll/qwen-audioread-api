@@ -14,6 +14,210 @@
 
 ---
 
+## 当前分支状态总览
+
+这份文档除了记录实验，也承担当前分支的恢复手册作用。
+
+### 当前已经确认的状态
+
+- 默认 runtime 已切换为：
+  - `http`
+- 默认最小认证模式为：
+  - `ticket-only`
+- 在默认 `http` 模式下，主转写链路已经可以走分支内自己的模块：
+  - `src/qwen_http_runtime/runtime.py`
+  - `src/qwen_http_runtime/accounts.py`
+  - `src/qwen_http_runtime/http.py`
+  - `src/qwen_http_runtime/oss_upload.py`
+  - `src/qwen_http_runtime/result_metadata.py`
+  - `src/qwen_http_runtime/flow.py`
+- 旧的 `qwen_web_capture.*` 仍保留在仓库中，但当前定位是：
+  - legacy / fallback / 对照实现
+  - 不再是默认依赖
+
+### 当前已经完成的验证层级
+
+- probe 级验证：已完成
+- 干净 venv、无 Playwright 验证：已完成
+- 正式 backend 代码路径验证：已完成
+- 服务级 API 回归验证：已完成
+- 默认 runtime 服务级回归验证：已完成
+
+### 当前还没做的事
+
+- 还没有把旧 Playwright 路径物理删除
+- 还没有补齐 service 层自动化测试，覆盖 `runtime=http` 的真实 job 执行
+- 还没有整理“迁移到主分支”的合并策略
+- 还没有决定是否保留 dual-backend 结构，还是彻底收口为单 backend
+
+### 当前分支的推荐认知
+
+可以把它理解成：
+
+> “HTTP runtime 已经成为默认主实现，Playwright 退化为遗留回退路径。”
+
+而不是：
+
+> “仓库里旧代码已经全部删除。”
+
+---
+
+## 重新测试清单
+
+如果后续重新打开这个分支，建议按下面顺序恢复，不要直接跳步骤。
+
+### 1. 先确认当前分支与工作区
+
+```bash
+git branch --show-current
+git status --short
+git log --oneline -3
+```
+
+预期：
+
+- 当前分支应为 `experiment/http-runtime`
+- 最近两个关键提交应能看到：
+  - `5876407 feat: add http runtime experiment backend`
+  - `e361d3c feat: make http runtime the default backend`
+
+### 2. 先跑单元测试
+
+```bash
+cd /Users/gq/Projects/qwen2api
+PYTHONPATH=src python -m unittest discover -s tests -v
+```
+
+### 3. 再跑干净 venv 验证
+
+确认无 Playwright：
+
+```bash
+/tmp/qwen2api-no-playwright-test/bin/python - <<'PY'
+import importlib.util
+print(importlib.util.find_spec('playwright'))
+PY
+```
+
+然后跑正式代码路径：
+
+```bash
+cd /Users/gq/Projects/qwen2api
+PYTHONPATH=src QWEN_HTTP_COOKIE_MODE=ticket-only \
+  /tmp/qwen2api-no-playwright-test/bin/python - <<'PY'
+import asyncio
+from pathlib import Path
+from qwen2api.config import get_settings
+from qwen2api.qwen_adapter import transcribe_via_qwen
+
+async def main():
+    get_settings.cache_clear()
+    settings = get_settings()
+    result = await transcribe_via_qwen(
+        settings=settings,
+        input_path=Path('/Volumes/GQ/63.打工人的法律必修课（完结）/7-当遭遇工伤与职业病之后.mp4'),
+        output_dir=Path('/tmp/qwen2api-http-backend-retest-output'),
+        export_format='md',
+        delete_remote=True,
+        account_id='',
+        account_strategy='round-robin',
+    )
+    print(result)
+
+asyncio.run(main())
+PY
+```
+
+### 4. 最后跑服务级验证
+
+启动服务：
+
+```bash
+cd /Users/gq/Projects/qwen2api
+QWEN_HTTP_COOKIE_MODE=ticket-only PYTHONPATH=src \
+  uvicorn qwen2api.main:app --host 127.0.0.1 --port 18002
+```
+
+另一个终端调用：
+
+```bash
+curl http://127.0.0.1:18002/health
+curl -X POST http://127.0.0.1:18002/api/v1/transcriptions/local/async \
+  -H 'Content-Type: application/json' \
+  -d '{"path":"/Volumes/GQ/63.打工人的法律必修课（完结）/7-当遭遇工伤与职业病之后.mp4","format":"md"}'
+curl http://127.0.0.1:18002/api/v1/jobs/<job_id>
+curl -L http://127.0.0.1:18002/api/v1/jobs/<job_id>/file -o result.md
+```
+
+### 5. 失败时先排什么
+
+优先按这个顺序排：
+
+1. 当前 auth 文件是不是还是有效
+2. `tongyi_sso_ticket` 是否还存在
+3. 远端千问接口是否临时变更
+4. OSS 上传是否返回异常
+5. export 接口返回码是否变化
+
+不要一上来就怀疑架构，先确认认证和远端行为有没有变。
+
+---
+
+## 后续优化顺序
+
+如果继续优化整个项目，建议按下面顺序推进。
+
+### P1：补 service 层自动化测试
+
+当前自动化测试主要还是：
+
+- 配置
+- bundle 选择
+- API 层基础路径
+
+下一步最应该补的是：
+
+- `runtime=http` 下的 job 执行路径测试
+- 至少把 `transcribe_via_qwen` mock 成 http backend 风格，覆盖 service 层
+
+### P2：明确 legacy 策略
+
+需要做决策：
+
+- 保留 `playwright` backend 多久
+- 是保留为 fallback，还是准备删除
+
+建议先保留，不要立刻删。
+
+### P3：收口认证文件格式
+
+当前已经证明最小认证 cookie 是：
+
+- `tongyi_sso_ticket`
+
+后面可以继续做：
+
+- 设计轻量 auth 文件格式
+- 不再要求完整 Playwright storage-state JSON
+- 运行时优先读取最小 auth 格式，再兼容旧 state
+
+### P4：从实验脚本抽离剩余辅助能力
+
+当前很多验证逻辑已经落到了正式 backend，但仍然可以继续收口：
+
+- 把更多 probe/diagnostic 能力抽成可复用 helper
+- 为后续排查保留更好的调试入口
+
+### P5：准备主分支合并策略
+
+后续如果要把这个分支合到主线，建议先决定：
+
+- 是直接切主分支默认 backend 到 `http`
+- 还是先做一次预发布分支
+- 是否需要新的 tag / release note
+
+---
+
 ## 背景结论
 
 前一轮隔离实验已经确认：
@@ -464,6 +668,41 @@
 
 - 当前分支默认 runtime 已经可以直接作为服务的默认运行方案
 - 到这一步，HTTP runtime 不仅“可以用”，而且已经“默认可用”
+
+### 2026-04-11：HTTP backend 模块收口
+
+这一轮继续把 HTTP runtime 从“可运行”推进到“自有模块闭环”：
+
+- 已新增：
+  - `src/qwen_http_runtime/runtime.py`
+  - `src/qwen_http_runtime/accounts.py`
+  - `src/qwen_http_runtime/http.py`
+  - `src/qwen_http_runtime/oss_upload.py`
+  - `src/qwen_http_runtime/result_metadata.py`
+- 已切换：
+  - `qwen_adapter` 在 `runtime_backend=http` 时加载 `qwen_http_runtime.*`
+  - `qwen_http_runtime/flow.py` 不再依赖旧的 `qwen_web_capture.http`
+  - `qwen_http_runtime/flow.py` 不再依赖旧的 `qwen_web_capture.oss_upload`
+  - `qwen_http_runtime/flow.py` 不再依赖旧的 `qwen_web_capture.runtime`
+
+保留情况：
+
+- `qwen_web_capture.*` 仍然保留在分支里，作为 legacy / playwright backend 回退路径
+- 但在默认 `http` 模式下，主链路已经不再依赖这些旧 helper 模块
+
+验证结果：
+
+- 单元测试通过
+- 干净 venv、无 Playwright 环境下，正式 `transcribe_via_qwen -> http backend` 代码路径再次成功：
+  - `record_id = b6c0dfc5-6c6c-437c-8e83-163479d455ab`
+  - `gen_record_id = r28pn728rx3wq5mz`
+  - `remote_deleted = True`
+  - `export_path = /private/tmp/qwen2api-http-backend-selfcontained-output/7-当遭遇工伤与职业病之后-2026-04-11T13-11-43+00-00.md`
+
+结论：
+
+- 当前分支在默认 HTTP 模式下，已经可以认为“主转写链路走的是分支内自己的程序调用”
+- 还保留旧 Playwright 路径，只是为了回退和对照，不再是默认依赖
 
 ### 2026-04-11：默认化决策
 
