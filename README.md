@@ -86,6 +86,13 @@ pip install -e .
 playwright install chromium
 ```
 
+说明：
+
+- 当前分支默认 runtime 是 `http`
+- 日常转写主链路默认不再依赖 Playwright
+- 这里保留 `playwright install chromium`，主要是为了首次登录脚本 `scripts/login_qwen.py`
+- 如果你只使用已有登录态文件，不重新登录，可以暂时不执行这一步
+
 ### 2. 准备配置
 
 ```bash
@@ -97,16 +104,25 @@ cp .env.example .env
 - 服务配置和执行链路配置共用同一个 `.env`
 - 单账号登录态默认读取 `.auth/qwen-storage-state.json`
 - 多账号时可复制 `accounts.example.json` 为 `accounts.json` 后再修改
-- 默认直接使用仓库内置的 `src/qwen_web_capture/` 执行链路
+- 默认使用 `http` runtime
+- 默认只发送最小认证 cookie：`tongyi_sso_ticket`
 
 关键配置项：
 
 - `QWEN2API_API_KEY`：可选接口鉴权
+- `QWEN2API_RUNTIME`：当前分支默认是 `http`
+- `QWEN_HTTP_COOKIE_MODE`：当前默认是 `ticket-only`
 - `QWEN2API_DELETE_REMOTE`：转写完成后是否删除远端记录
 - `QWEN2API_QWEN_AUTH_STATE`：单账号默认登录态
 - `QWEN2API_QWEN_ACCOUNTS_FILE`：多账号池配置
 - `QWEN2API_QWEN_DOTENV`：执行链路读取的环境变量文件
 - `QWEN2API_QWEN_ROOT`：可选；仅在你要切换到其他执行链路 checkout 时覆盖
+
+如果你要切回旧的 Playwright backend，可以显式设置：
+
+```bash
+QWEN2API_RUNTIME=playwright
+```
 
 如果你使用多账号，建议补一份配置：
 

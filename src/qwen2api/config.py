@@ -100,7 +100,7 @@ def get_settings() -> Settings:
         port=int(os.environ.get("QWEN2API_PORT", "8000")),
         data_dir=data_dir,
         api_key=os.environ.get("QWEN2API_API_KEY", "").strip(),
-        runtime_backend=os.environ.get("QWEN2API_RUNTIME", "playwright").strip().lower() or "playwright",
+        runtime_backend=os.environ.get("QWEN2API_RUNTIME", "http").strip().lower() or "http",
         default_format=os.environ.get("QWEN2API_DEFAULT_FORMAT", "md").strip().lower() or "md",
         delete_remote=os.environ.get("QWEN2API_DELETE_REMOTE", "true").strip().lower() in {"1", "true", "yes", "on"},
         export_concurrency=max(1, int(os.environ.get("QWEN2API_EXPORT_CONCURRENCY", "2"))),

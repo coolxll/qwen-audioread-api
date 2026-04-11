@@ -36,6 +36,12 @@ pip install -e .
 playwright install chromium
 ```
 
+说明：
+
+- 当前分支默认 backend 是 `http`
+- 转写主链路默认不依赖 Playwright
+- 这里保留 Playwright 安装步骤，主要用于首次登录脚本 `scripts/login_qwen.py`
+
 ### 登录态
 
 至少确认下面两项之一已经准备好：
@@ -73,6 +79,8 @@ cp accounts.example.json accounts.json
 推荐先检查：
 
 - `QWEN2API_API_KEY`
+- `QWEN2API_RUNTIME`
+- `QWEN_HTTP_COOKIE_MODE`
 - `QWEN2API_DELETE_REMOTE`
 - `QWEN2API_QWEN_AUTH_STATE`
 - `QWEN2API_QWEN_ACCOUNTS_FILE`
@@ -81,8 +89,15 @@ cp accounts.example.json accounts.json
 默认情况下：
 
 - 服务配置与执行链路配置共用仓库根目录下的 `.env`
-- 服务直接使用仓库内置的 `src/qwen_web_capture/`
+- 服务默认使用 `http` backend
+- 默认只发送最小认证 cookie：`tongyi_sso_ticket`
 - 只有在你明确切换到其他执行链路 checkout 时，才需要覆盖 `QWEN2API_QWEN_ROOT`
+
+如果需要切回旧实现，可显式配置：
+
+```bash
+QWEN2API_RUNTIME=playwright
+```
 
 ---
 

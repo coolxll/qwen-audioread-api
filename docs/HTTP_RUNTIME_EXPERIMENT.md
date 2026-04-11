@@ -431,6 +431,60 @@
 - **整个 qwen2api 服务在 HTTP backend 模式下也已真实跑通**
 - 到这一步，HTTP runtime 已经具备进入默认化/替换评估的条件
 
+### 2026-04-11：默认 runtime 服务级回归
+
+启动方式：
+
+- 不显式设置 `QWEN2API_RUNTIME`
+- 仅设置：
+  - `QWEN_HTTP_COOKIE_MODE=ticket-only`
+- 启动命令：
+  - `PYTHONPATH=src uvicorn qwen2api.main:app --host 127.0.0.1 --port 18002`
+
+说明：
+
+- 这一步用于证明“当前分支默认值已经切到 HTTP runtime”
+- 不是靠额外设置 `QWEN2API_RUNTIME=http` 才能成功
+
+验证接口：
+
+- `GET /health`
+- `POST /api/v1/transcriptions/local/async`
+- `GET /api/v1/jobs/{job_id}`
+
+关键结果：
+
+- `job_id = job_20260411T060414Z_b105ac81`
+- `status = succeeded`
+- `record_id = 3b62de2f-e10e-4f04-882b-a43f26c42848`
+- `gen_record_id = klrbn2mw4yd895zy`
+- `output_file = /Users/gq/Projects/qwen2api/data/outputs/7-当遭遇工伤与职业病之后-2.md`
+
+结论：
+
+- 当前分支默认 runtime 已经可以直接作为服务的默认运行方案
+- 到这一步，HTTP runtime 不仅“可以用”，而且已经“默认可用”
+
+### 2026-04-11：默认化决策
+
+当前分支决定：
+
+- `QWEN2API_RUNTIME` 默认值改成 `http`
+- `QWEN_HTTP_COOKIE_MODE` 默认值保留 `ticket-only`
+- Playwright backend 暂不删除，保留为回退路径
+- `scripts/login_qwen.py` 继续保留，用于首次登录和 state 采集
+
+原因：
+
+- probe 级验证：已通过
+- 正式 backend 验证：已通过
+- 服务级回归：已通过
+- 无 Playwright 干净 venv：已通过
+
+结论：
+
+- 当前分支已经具备“默认走 HTTP runtime”的条件
+
 ---
 
 ## 当前判断

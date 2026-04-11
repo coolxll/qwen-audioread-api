@@ -221,7 +221,6 @@ class ServiceTests(unittest.TestCase):
                 "\n".join(
                     [
                         "QWEN2API_DATA_DIR=./custom-data",
-                        "QWEN2API_RUNTIME=http",
                         "QWEN2API_QWEN_ROOT=.",
                         "QWEN2API_QWEN_DOTENV=.env",
                         "QWEN2API_QWEN_AUTH_STATE=.auth/qwen-storage-state.json",
@@ -245,6 +244,19 @@ class ServiceTests(unittest.TestCase):
             self.assertEqual(settings.qwen_auth_state_path, (root / ".auth" / "qwen-storage-state.json").resolve())
             self.assertEqual(settings.qwen_accounts_file, (root / "accounts.json").resolve())
 
+            get_settings.cache_clear()
+
+    def test_get_settings_runtime_override_keeps_playwright_available(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".env").write_text("QWEN2API_RUNTIME=playwright\n", encoding="utf-8")
+
+            with patch.dict(os.environ, {}, clear=True):
+                get_settings.cache_clear()
+                with patch("qwen2api.config._project_root", return_value=root):
+                    settings = get_settings()
+
+            self.assertEqual(settings.runtime_backend, "playwright")
             get_settings.cache_clear()
 
     def test_load_qwen_bundle_uses_http_flow_when_runtime_is_http(self) -> None:
