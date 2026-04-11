@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 import os
 import tempfile
 import unittest
@@ -37,6 +38,7 @@ def make_settings(root: Path) -> Settings:
         port=18000,
         data_dir=data_dir,
         api_key="",
+        runtime_backend="playwright",
         default_format="md",
         delete_remote=True,
         export_concurrency=2,
@@ -219,6 +221,7 @@ class ServiceTests(unittest.TestCase):
                 "\n".join(
                     [
                         "QWEN2API_DATA_DIR=./custom-data",
+                        "QWEN2API_RUNTIME=http",
                         "QWEN2API_QWEN_ROOT=.",
                         "QWEN2API_QWEN_DOTENV=.env",
                         "QWEN2API_QWEN_AUTH_STATE=.auth/qwen-storage-state.json",
@@ -236,12 +239,21 @@ class ServiceTests(unittest.TestCase):
 
             self.assertEqual(settings.project_root, root)
             self.assertEqual(settings.data_dir, (root / "custom-data").resolve())
+            self.assertEqual(settings.runtime_backend, "http")
             self.assertEqual(settings.qwen_root, root.resolve())
             self.assertEqual(settings.qwen_dotenv_path, (root / ".env").resolve())
             self.assertEqual(settings.qwen_auth_state_path, (root / ".auth" / "qwen-storage-state.json").resolve())
             self.assertEqual(settings.qwen_accounts_file, (root / "accounts.json").resolve())
 
             get_settings.cache_clear()
+
+    def test_load_qwen_bundle_uses_http_flow_when_runtime_is_http(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            settings = replace(make_settings(Path(tmp)), runtime_backend="http")
+            from qwen2api.qwen_adapter import load_qwen_bundle
+
+            bundle = load_qwen_bundle(settings)
+            self.assertEqual(bundle.run_real_flow.__module__, "qwen_http_runtime.flow")
 
     def test_build_success_payload_uses_suffix_when_flat_output_exists(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

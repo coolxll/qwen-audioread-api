@@ -48,8 +48,11 @@ def _import_with_optional_src(settings: Settings, module_name: str):
 def load_qwen_bundle(settings: Settings) -> QwenBundle:
     runtime = _import_with_optional_src(settings, "qwen_web_capture.runtime")
     accounts = _import_with_optional_src(settings, "qwen_web_capture.accounts")
-    flow = _import_with_optional_src(settings, "qwen_web_capture.flow")
     result_metadata = _import_with_optional_src(settings, "qwen_web_capture.result_metadata")
+    if settings.runtime_backend == "http":
+        flow = import_module("qwen_http_runtime.flow")
+    else:
+        flow = _import_with_optional_src(settings, "qwen_web_capture.flow")
     return QwenBundle(
         load_dotenv=runtime.load_dotenv,
         get_export_config=runtime.get_export_config,

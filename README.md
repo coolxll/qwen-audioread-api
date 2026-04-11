@@ -12,6 +12,7 @@
 - [新手快速上手](./docs/QUICKSTART.md)
 - [API 文档](./docs/API.md)
 - [运维文档](./docs/OPERATIONS.md)
+- [分析排查手册](./docs/ANALYSIS_PLAYBOOK.md)
 
 ## 设计约束
 
