@@ -13,6 +13,7 @@ from urllib import error as urllib_error
 from urllib import request as urllib_request
 
 from .http import download_file
+from .minimal_auth import is_minimal_auth_format, is_legacy_storage_format
 from .oss_upload import upload_file_to_oss
 from .runtime import ExportConfig, ensure_dir, guess_mime_type, now_stamp
 
@@ -147,7 +148,28 @@ def record_quota_consumption(
 
 
 def _load_auth_payload(auth_state_path: str | Path) -> dict[str, Any]:
-    return json.loads(Path(auth_state_path).expanduser().resolve().read_text(encoding="utf-8"))
+    path = Path(auth_state_path).expanduser().resolve()
+    if not path.exists():
+        raise FileNotFoundError(f"Auth file not found: {path}")
+    
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        raise ValueError(f"Invalid JSON in auth file {path}: {error}") from error
+    
+    if not isinstance(payload, dict):
+        raise ValueError("Auth file must contain a JSON object")
+    
+    # Validate format and provide clear error messages
+    if not is_minimal_auth_format(payload) and not is_legacy_storage_format(payload):
+        raise ValueError(
+            f"Unsupported auth file format: {path}\n"
+            f"Expected either:\n"
+            f"  1. Minimal format: {{\"tongyi_sso_ticket\": \"<value>\"}}\n"
+            f"  2. Legacy Playwright storage state with \"cookies\" array"
+        )
+    
+    return payload
 
 
 def _select_cookies(payload: dict[str, Any], mode: str) -> list[CookieItem]:
