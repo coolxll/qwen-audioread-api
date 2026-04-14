@@ -4,7 +4,15 @@
       "Bash(git checkout *)",
       "Bash(git add *)",
       "Bash(git commit *)",
-      "Bash(python *)"
+      "Bash(python *)",
+      "Bash(python3 *)",
+      "Bash(/tmp/qwen2api-isolated-test/bin/pip *)",
+      "Bash(/tmp/qwen2api-isolated-test/bin/python *)",
+      "Bash(source *)",
+      "Bash(nohup *)",
+      "Bash(sleep *)",
+      "Bash(curl *)",
+      "Bash(ls *)"
     ]
   },
   "$version": 3
