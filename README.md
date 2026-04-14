@@ -5,7 +5,8 @@
 项目内置执行链路：
 
 - `src/qwen2api/`：API、队列、任务存储、批次视图、重试、报告
-- `src/qwen_web_capture/`：浏览器态执行、上传、轮询、导出
+- `src/qwen_http_runtime/`：当前默认执行链路，负责纯 HTTP 上传、轮询、导出
+- `src/qwen_web_capture/`：legacy / fallback 浏览器态执行链路，主要用于兼容和回退
 
 补充文档：
 
