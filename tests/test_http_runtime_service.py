@@ -116,6 +116,53 @@ class HttpRuntimeBundleTests(unittest.TestCase):
             self.assertEqual(config.label, "docx")
 
 
+class HttpRuntimeUploadTests(unittest.TestCase):
+    """Test HTTP runtime upload helpers."""
+
+    def test_upload_file_to_oss_streams_chunks_from_path(self) -> None:
+        """Multipart upload should stream a path without preloading the whole file."""
+        from qwen_http_runtime.oss_upload import upload_file_to_oss
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "sample.mp4"
+            source.write_bytes(b"abcdefghij")
+
+            token = {
+                "sts": {
+                    "bucket": "bucket",
+                    "endpoint": "oss.example.com",
+                    "fileKey": "uploads/sample.mp4",
+                    "accessKeyId": "key-id",
+                    "accessKeySecret": "secret",
+                    "securityToken": "security-token",
+                }
+            }
+
+            chunks: list[bytes] = []
+
+            def record_part(sts, upload_id, part_number, chunk, mime_type):
+                chunks.append(chunk)
+                return f"etag-{part_number}"
+
+            with patch("qwen_http_runtime.oss_upload.initiate_multipart_upload", return_value="upload-1"), patch(
+                "qwen_http_runtime.oss_upload.upload_part",
+                side_effect=record_part,
+            ), patch("qwen_http_runtime.oss_upload.complete_multipart_upload", return_value=None):
+                asyncio.run(
+                    upload_file_to_oss(
+                        token=token,
+                        file_buffer=source,
+                        mime_type="video/mp4",
+                        part_size=4,
+                        upload_mode="multipart",
+                    )
+                )
+
+            self.assertEqual([len(chunk) for chunk in chunks], [4, 4, 2])
+            self.assertEqual(b"".join(chunks), b"abcdefghij")
+
+
 class HttpRuntimeServiceExecutionTests(unittest.TestCase):
     """Test service layer execution with HTTP runtime backend."""
 

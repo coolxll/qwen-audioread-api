@@ -426,7 +426,6 @@ async def run_real_flow(
     output_dir = Path(download_dir).resolve()
     mime_type = guess_mime_type(input_path)
     stats = input_path.stat()
-    file_buffer = input_path.read_bytes()
     quota_before = await get_quota_snapshot(auth_state_path=auth_state_path)
     cookie_header = _build_cookie_header(auth_state_path)
 
@@ -448,7 +447,7 @@ async def run_real_flow(
 
     await upload_file_to_oss(
         token=token,
-        file_buffer=file_buffer,
+        file_buffer=input_path,
         mime_type=mime_type,
     )
 

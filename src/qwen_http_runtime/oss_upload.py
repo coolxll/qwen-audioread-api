@@ -7,12 +7,28 @@ import hashlib
 import hmac
 import os
 import re
+from pathlib import Path
 from typing import Any, Callable
 from urllib import request as urllib_request
 from xml.sax.saxutils import escape as xml_escape
 
 
 ProgressCallback = Callable[[dict[str, Any]], None]
+
+
+def _coerce_path(file_buffer: bytes | str | Path) -> Path | None:
+    if isinstance(file_buffer, Path):
+        return file_buffer.expanduser().resolve()
+    if isinstance(file_buffer, str):
+        return Path(file_buffer).expanduser().resolve()
+    return None
+
+
+def _source_size(file_buffer: bytes | str | Path) -> int:
+    path = _coerce_path(file_buffer)
+    if path is not None:
+        return path.stat().st_size
+    return len(file_buffer)
 
 
 def md5_base64(input_bytes: bytes) -> str:
@@ -129,7 +145,14 @@ def initiate_multipart_upload(sts: dict[str, Any], mime_type: str) -> str:
         return parse_upload_id(response.read().decode("utf-8", errors="replace"))
 
 
-def direct_upload_with_presigned_url(url: str, file_buffer: bytes, mime_type: str) -> None:
+def direct_upload_with_presigned_url(url: str, file_buffer: bytes | str | Path, mime_type: str) -> None:
+    path = _coerce_path(file_buffer)
+    if path is not None:
+        with path.open("rb") as stream:
+            req = urllib_request.Request(url, data=stream, method="PUT", headers={"content-type": mime_type})
+            with _open_request(req):
+                return
+
     req = urllib_request.Request(url, data=file_buffer, method="PUT", headers={"content-type": mime_type})
     with _open_request(req):
         return
@@ -223,7 +246,7 @@ def complete_multipart_upload(sts: dict[str, Any], upload_id: str, parts: list[d
 async def upload_file_to_oss(
     *,
     token: dict[str, Any],
-    file_buffer: bytes,
+    file_buffer: bytes | str | Path,
     mime_type: str,
     part_size: int = 1024 * 1024,
     on_progress: ProgressCallback | None = None,
@@ -233,6 +256,9 @@ async def upload_file_to_oss(
     mode = (upload_mode or os.environ.get("QWEN_OSS_UPLOAD_MODE", "multipart")).strip().lower()
     if mode not in {"multipart", "auto", "direct"}:
         raise ValueError(f"Unsupported OSS upload mode: {mode}")
+
+    file_path = _coerce_path(file_buffer)
+    file_size = _source_size(file_buffer)
 
     if mode in {"auto", "direct"}:
         try:
@@ -247,13 +273,25 @@ async def upload_file_to_oss(
     upload_id = await asyncio.to_thread(initiate_multipart_upload, token["sts"], mime_type)
     callback({"type": "multipart-started", "uploadId": upload_id})
 
-    total_parts = (len(file_buffer) + part_size - 1) // part_size
+    total_parts = (file_size + part_size - 1) // part_size
     parts: list[dict[str, Any]] = []
-    for offset, part_number in zip(range(0, len(file_buffer), part_size), range(1, total_parts + 1), strict=True):
-        chunk = file_buffer[offset : offset + part_size]
-        etag = await asyncio.to_thread(upload_part, token["sts"], upload_id, part_number, chunk, mime_type)
-        parts.append({"partNumber": part_number, "etag": etag})
-        callback({"type": "part-uploaded", "partNumber": part_number, "totalParts": total_parts})
+    if file_path is not None:
+        with file_path.open("rb") as stream:
+            part_number = 1
+            while True:
+                chunk = stream.read(part_size)
+                if not chunk:
+                    break
+                etag = await asyncio.to_thread(upload_part, token["sts"], upload_id, part_number, chunk, mime_type)
+                parts.append({"partNumber": part_number, "etag": etag})
+                callback({"type": "part-uploaded", "partNumber": part_number, "totalParts": total_parts})
+                part_number += 1
+    else:
+        for offset, part_number in zip(range(0, len(file_buffer), part_size), range(1, total_parts + 1), strict=True):
+            chunk = file_buffer[offset : offset + part_size]
+            etag = await asyncio.to_thread(upload_part, token["sts"], upload_id, part_number, chunk, mime_type)
+            parts.append({"partNumber": part_number, "etag": etag})
+            callback({"type": "part-uploaded", "partNumber": part_number, "totalParts": total_parts})
 
     await asyncio.to_thread(complete_multipart_upload, token["sts"], upload_id, parts)
     callback({"type": "multipart-complete"})
