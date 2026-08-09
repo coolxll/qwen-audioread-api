@@ -28,6 +28,7 @@ from qwen2api.storage import (
     save_batch,
     save_job,
 )
+from qwen_http_runtime.flow import poll_until_done
 
 
 def make_http_settings(root: Path) -> Settings:
@@ -161,6 +162,47 @@ class HttpRuntimeUploadTests(unittest.TestCase):
 
             self.assertEqual([len(chunk) for chunk in chunks], [4, 4, 2])
             self.assertEqual(b"".join(chunks), b"abcdefghij")
+
+
+class HttpRuntimePollingTests(unittest.IsolatedAsyncioTestCase):
+    async def test_poll_returns_completed_record(self) -> None:
+        response = {
+            "code": 0,
+            "data": {
+                "batchRecord": [
+                    {"recordList": [{"genRecordId": "gen-1", "recordStatus": 30}]},
+                ]
+            },
+        }
+        with patch("qwen_http_runtime.flow._post_json", new=AsyncMock(return_value=response)):
+            record = await poll_until_done("ticket=value", "gen-1")
+        self.assertEqual(record["recordStatus"], 30)
+
+    async def test_poll_raises_immediately_for_terminal_failure(self) -> None:
+        response = {
+            "code": 0,
+            "data": {
+                "batchRecord": [
+                    {
+                        "recordList": [
+                            {
+                                "genRecordId": "gen-failed",
+                                "recordStatus": 40,
+                                "failReason": "unsupported media",
+                            }
+                        ]
+                    },
+                ]
+            },
+        }
+        with patch("qwen_http_runtime.flow._post_json", new=AsyncMock(return_value=response)):
+            with self.assertRaisesRegex(RuntimeError, "status=40.*unsupported media"):
+                await poll_until_done("ticket=value", "gen-failed")
+
+    async def test_poll_times_out_without_sleeping(self) -> None:
+        with patch("qwen_http_runtime.flow.time.monotonic", side_effect=[0, 901]):
+            with self.assertRaisesRegex(RuntimeError, "Polling timed out"):
+                await poll_until_done("ticket=value", "gen-timeout")
 
 
 class HttpRuntimeServiceExecutionTests(unittest.TestCase):

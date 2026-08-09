@@ -102,7 +102,7 @@ class TranscriptionApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         body = response.json()
         self.assertEqual(body["format"], "md")
-        self.assertEqual(body["markdown_filename"], "课程?.md")
+        self.assertEqual(body["markdown_filename"], "课程？.md")
         self.assertEqual(body["suggested_poll_after_seconds"], 60)
 
     def test_async_transcription_returns_queue_metadata(self) -> None:
@@ -116,7 +116,7 @@ class TranscriptionApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 202)
         body = response.json()
         self.assertEqual(body["status"], "queued")
-        self.assertEqual(body["markdown_filename"], "课程?.md")
+        self.assertEqual(body["markdown_filename"], "课程？.md")
         self.assertEqual(body["suggested_poll_after_seconds"], 60)
 
     def test_local_batch_submission_uses_source_paths_and_returns_unique_names(self) -> None:
@@ -124,8 +124,8 @@ class TranscriptionApiTests(unittest.TestCase):
         right_dir = self.root / "right"
         left_dir.mkdir()
         right_dir.mkdir()
-        left_file = left_dir / "课程?.mp4"
-        right_file = right_dir / "课程?.mp4"
+        left_file = left_dir / "课程？.mp4"
+        right_file = right_dir / "课程？.mp4"
         left_file.write_bytes(b"a")
         right_file.write_bytes(b"b")
 
@@ -140,8 +140,8 @@ class TranscriptionApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 202)
         body = response.json()
-        self.assertEqual(body["items"][0]["markdown_filename"], "课程?.md")
-        self.assertEqual(body["items"][1]["markdown_filename"], "课程?-2.md")
+        self.assertEqual(body["items"][0]["markdown_filename"], "课程？.md")
+        self.assertEqual(body["items"][1]["markdown_filename"], "课程？-2.md")
 
         first_job_id = body["items"][0]["job_id"]
         first_job = self.client.get(f"/api/v1/jobs/{first_job_id}").json()
@@ -159,7 +159,7 @@ class TranscriptionApiTests(unittest.TestCase):
         self.assertEqual(response.json()["detail"]["code"], "MD_ONLY_OUTPUT")
 
     def test_batch_report_endpoint_returns_markdown(self) -> None:
-        output_path = self.settings.outputs_dir / "课程?.md"
+        output_path = self.settings.outputs_dir / "课程？.md"
         output_path.write_text("# done\n", encoding="utf-8")
         job_payload = init_job_payload(
             "job_report",
@@ -195,7 +195,7 @@ class TranscriptionApiTests(unittest.TestCase):
                     {
                         "job_id": "job_report",
                         "original_filename": "课程?.mp4",
-                        "markdown_filename": "课程?.md",
+                        "markdown_filename": "课程？.md",
                         "status": "queued",
                         "job_url": "/api/v1/jobs/job_report",
                         "download_url": "/api/v1/jobs/job_report/file",
@@ -208,7 +208,7 @@ class TranscriptionApiTests(unittest.TestCase):
         response = self.client.get("/api/v1/batches/batch_report/report?format=md")
         self.assertEqual(response.status_code, 200)
         self.assertIn("Batch Report", response.text)
-        self.assertIn("课程?.md", response.text)
+        self.assertIn("课程？.md", response.text)
         self.assertIn("Success rate", response.text)
         self.assertIn("Source Modes", response.text)
 
@@ -274,12 +274,12 @@ class ServiceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             settings = make_settings(root)
-            existing_output = settings.outputs_dir / "课程?.md"
+            existing_output = settings.outputs_dir / "课程？.md"
             existing_output.write_text("old\n", encoding="utf-8")
 
             source_dir = root / "job" / "outputs"
             source_dir.mkdir(parents=True, exist_ok=True)
-            export_path = source_dir / "课程?.md"
+            export_path = source_dir / "课程？.md"
             export_path.write_text("new\n", encoding="utf-8")
             export_path.with_suffix(".md.meta.json").write_text("{}", encoding="utf-8")
 
@@ -291,7 +291,7 @@ class ServiceTests(unittest.TestCase):
                 account_strategy="round-robin",
                 queued=False,
                 suggested_poll_seconds=60,
-                target_markdown_name="课程?.md",
+                target_markdown_name="课程？.md",
             )
 
             result = build_success_payload(
@@ -307,10 +307,10 @@ class ServiceTests(unittest.TestCase):
                 ),
             )
 
-            self.assertEqual(result["markdown_filename"], "课程?-2.md")
-            self.assertEqual(Path(result["output_file"]).name, "课程?-2.md")
+            self.assertEqual(result["markdown_filename"], "课程？-2.md")
+            self.assertEqual(Path(result["output_file"]).name, "课程？-2.md")
             self.assertEqual(existing_output.read_text(encoding="utf-8"), "old\n")
-            self.assertFalse((settings.outputs_dir / "课程?-2.md.meta.json").exists())
+            self.assertFalse((settings.outputs_dir / "课程？-2.md.meta.json").exists())
 
     def test_serialize_job_payload_drops_text_by_default(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -330,8 +330,8 @@ class ServiceTests(unittest.TestCase):
             settings = make_settings(Path(tmp))
             name1 = reserve_markdown_name(settings.runtime_dir, settings.outputs_dir, "课程?.mp4")
             name2 = reserve_markdown_name(settings.runtime_dir, settings.outputs_dir, "课程?.mp4")
-            self.assertEqual(name1, "课程?.md")
-            self.assertEqual(name2, "课程?-2.md")
+            self.assertEqual(name1, "课程？.md")
+            self.assertEqual(name2, "课程？-2.md")
             release_markdown_name_reservation(settings.runtime_dir, name1)
             release_markdown_name_reservation(settings.runtime_dir, name2)
 

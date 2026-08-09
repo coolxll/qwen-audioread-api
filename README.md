@@ -1,6 +1,6 @@
-# qwen2api
+# Qwen AudioRead API
 
-`qwen2api` 是一个独立发布的 HTTP API 服务，用来把通义千问「音视频速读」能力包装成稳定的本地/私有接口。
+`qwen-audioread-api` 是一个独立发布的 HTTP API 服务，用来把通义千问「音视频速读」能力包装成稳定的本地/私有接口。
 
 项目内置执行链路：
 
@@ -55,7 +55,7 @@
 ## 项目目录
 
 ```text
-qwen2api/
+qwen-audioread-api/
 ├── src/
 │   ├── qwen2api/
 │   └── qwen_web_capture/

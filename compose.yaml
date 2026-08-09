@@ -1,0 +1,23 @@
+services:
+  qwen-audioread-api:
+    container_name: qwen-audioread-api
+    image: ${QWEN_AUDIOREAD_IMAGE:-ghcr.io/coolxll/qwen-audioread-api:local}
+    build:
+      context: .
+    env_file:
+      - ${QWEN_AUDIOREAD_ENV_FILE:-.env.production}
+    ports:
+      - "127.0.0.1:${QWEN_AUDIOREAD_HOST_PORT:-11308}:8000"
+    volumes:
+      - ./data:/app/data
+      - ./.auth:/app/.auth:ro
+    init: true
+    restart: unless-stopped
+    cpus: 1.0
+    mem_limit: 512m
+    pids_limit: 128
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"

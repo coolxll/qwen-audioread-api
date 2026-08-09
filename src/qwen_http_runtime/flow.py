@@ -337,10 +337,26 @@ async def poll_until_done(cookie_header: str, gen_record_id: str) -> dict[str, A
     deadline = time.monotonic() + (15 * 60)
     while time.monotonic() < deadline:
         response = await _post_json(POLL_URL, payload, _request_cookie_headers(cookie_header))
+        _require_success("record poll", response)
         for batch in (response.get("data") or {}).get("batchRecord", []):
             for record in batch.get("recordList", []):
-                if record.get("genRecordId") == gen_record_id and record.get("recordStatus") == 30:
+                if record.get("genRecordId") != gen_record_id:
+                    continue
+                status = number_value(record.get("recordStatus"))
+                if status == 30:
                     return record
+                if status in {40, 41}:
+                    detail = next(
+                        (
+                            str(record.get(key)).strip()
+                            for key in ("failReason", "errorMessage", "errorMsg", "message", "recordStatusDesc")
+                            if str(record.get(key) or "").strip()
+                        ),
+                        "remote task entered a terminal failure state",
+                    )
+                    raise RuntimeError(
+                        f"Transcription failed for genRecordId={gen_record_id}: status={status} detail={detail}"
+                    )
         await asyncio.sleep(5)
     raise RuntimeError(f"Polling timed out for genRecordId={gen_record_id}")
 

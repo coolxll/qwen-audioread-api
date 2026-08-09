@@ -47,6 +47,12 @@ def sanitize_publish_filename(filename: str) -> str:
         "/": "／",
         "\\": "＼",
         ":": "：",
+        "<": "＜",
+        ">": "＞",
+        '"': "＂",
+        "|": "｜",
+        "?": "？",
+        "*": "＊",
         "\x00": "",
     }
     safe: list[str] = []

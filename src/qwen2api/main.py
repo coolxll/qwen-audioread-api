@@ -21,7 +21,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         finally:
             await stop_job_workers(app)
 
-    app = FastAPI(title="qwen2api", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="Qwen AudioRead API", version="0.1.0", lifespan=lifespan)
     app.state.settings = resolved_settings
     app.include_router(health_router)
     app.include_router(transcriptions_router)

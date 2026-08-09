@@ -3,16 +3,21 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "qwen2api"
+name = "qwen-audioread-api"
 version = "0.1.0"
 description = "Native API wrapper for the Qianwen web transcription workflow"
 requires-python = ">=3.11"
 dependencies = [
-  "fastapi>=0.115,<1",
+  "fastapi>=0.115,<0.117",
   "uvicorn[standard]>=0.30,<1",
   "python-multipart>=0.0.9,<1",
   "pydantic>=2,<3",
   "playwright>=1.52,<2",
+]
+
+[project.optional-dependencies]
+test = [
+  "httpx>=0.27,<1",
 ]
 
 [tool.setuptools]
