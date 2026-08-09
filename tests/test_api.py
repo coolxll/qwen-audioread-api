@@ -73,6 +73,20 @@ class TranscriptionApiTests(unittest.TestCase):
         self.client.close()
         self.tempdir.cleanup()
 
+    def test_readiness_reports_missing_auth(self) -> None:
+        response = self.client.get("/ready")
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json(), {"status": "not_ready", "reason": "auth_missing"})
+
+    def test_readiness_accepts_minimal_auth(self) -> None:
+        self.settings.qwen_auth_state_path.write_text(
+            '{"tongyi_sso_ticket":"ticket-value"}',
+            encoding="utf-8",
+        )
+        response = self.client.get("/ready")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"status": "ready"})
+
     def test_sync_transcription_returns_markdown_metadata(self) -> None:
         async def fake_run_transcription(**kwargs):
             job_payload = kwargs["job_payload"]
